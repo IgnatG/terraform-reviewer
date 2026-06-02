@@ -16,18 +16,29 @@
 A reusable GitHub Actions workflow that reviews Terraform pull requests with a
 LangGraph multi-agent system and posts a single, severity-ranked sticky comment.
 
-Three specialists run in parallel over the PR's changed Terraform files:
+Pluggable **lenses** run in parallel over the PR's changed Terraform files. Three
+run by default:
 
-| Agent | Scanners | Looks for |
+| Lens | Scanners | Looks for |
 |:--|:--|:--|
-| 🔒 **Security** | `tfsec` + `checkov` | misconfigurations, insecure defaults, exposed resources |
+| 🔒 **Security** | `tfsec` + `checkov` (+ optional Prowler/gitleaks/Trivy SARIF) | misconfigurations, insecure defaults, exposed resources, secrets |
 | 💰 **Cost** | `infracost diff` | monthly cost deltas vs. the base branch |
-| 🎨 **Style** | `tflint` + `terraform fmt -check` | lint findings and formatting drift |
+| 🎨 **Style** | `tflint` + `terraform fmt -check` (+ optional MegaLinter SARIF) | lint findings and formatting drift |
+
+Three more are **opt-in** (off by default, deterministic, no AI needed):
+
+| Lens | Enable with | Looks for |
+|:--|:--|:--|
+| 📋 **Standards** | `ENABLED_RULE_PACKS` | maps findings to standard controls (✅/◐/○) + flags missing README/LICENSE/… via versioned rule packs |
+| 🏗️ **Terraform Std** (A1) | `terraform-standard` | golden module structure: required files + `terraform{}` `required_version`/`required_providers` blocks, with a consistency score |
+| ⚙️ **CI/CD** (A2) | `cicd-standard` | `.github/workflows` posture: no `pull_request_target`, SHA-pinned actions, least-privilege `permissions`, with a posture score |
 
 Scanners own *detection and severity*; an LLM only rewords each finding into a
 concise, actionable sentence — so the set of findings is deterministic run to
 run. Results are merged, de-duplicated, severity-ranked, and upserted as one
-comment (edited in place on every push) rather than stacking up.
+comment (edited in place on every push) rather than stacking up. Every finding is
+also emitted in a versioned `findings.json` artefact. See
+[`examples/README.md`](examples/README.md) for enabling A1/A2.
 
 
 ---
@@ -159,15 +170,22 @@ GitHub PR event
         └─► container: ghcr.io/ignatg/terraform-review-agent:v1
               └─► python -m terraform_review_agent.entrypoint
                     └─► LangGraph:
-                          start ─► [security ∥ cost ∥ style] ─► aggregator ─► post_comment
+                          start ─► [lens ∥ lens ∥ …] ─► aggregator ─► post_comment
 ```
 
 - **start** filters the PR to Terraform files and early-exits if none changed.
-- **security / cost / style** run their scanners, then an LLM rewords the
-  findings (it cannot change severity, file, line, or rule).
+- **lenses** — the registry fans out one parallel task per enabled lens (the
+  default security/cost/style plus any opt-in standards/A1/A2). Scanner lenses
+  then have an LLM reword the findings (it cannot change severity, file, line, or
+  rule); the deterministic lenses (standards/A1/A2) skip the LLM entirely.
 - **aggregator** dedupes by `(file, rule, line)`, severity-ranks, and renders
   the markdown.
 - **post_comment** upserts the sticky comment via a hidden HTML marker.
+
+Alongside the comment, every run writes a versioned **`findings.json`** — the
+machine-readable output contract (schema:
+[`schemas/findings.schema.json`](schemas/findings.schema.json)) — and the
+reusable workflow uploads it as the `terraform-review-findings` artefact.
 
 Scanner versions are pinned in the container image — bumping one is a
 rebuild-image PR in this repo, not an edit to your workflow file.
@@ -214,14 +232,14 @@ as the reusable workflow does in CI.
 
 3. **Review a PR.** Point `--repository`/`--pr-number` at any repo your token
    can reach. Using the sample Cloud Run service repo
-   [`spanosg131/gcp-test-cloudrun-service`](https://github.com/spanosg131/gcp-test-cloudrun-service)
+   [`ignatg/gcp-test-cloudrun-service`](https://github.com/ignatg/gcp-test-cloudrun-service)
    — open (or reuse) a PR there that touches a `.tf` file, then:
 
    ```bash
-   make run ARGS="--repository spanosg131/gcp-test-cloudrun-service --pr-number 2"
+   make run ARGS="--repository ignatg/gcp-test-cloudrun-service --pr-number 2"
    ```
 
-   The agent fetches the PR, runs the three specialists, and posts/edits the
+   The agent fetches the PR, runs the enabled lenses, and posts/edits the
    sticky comment on PR #2. (You can also set `GITHUB_REPOSITORY` /
    `GITHUB_PR_NUMBER` in `.env` and run `make run` with no `ARGS`.)
 
@@ -235,4 +253,6 @@ as the reusable workflow does in CI.
 
 ## License
 
-MIT
+[AGPL-3.0-or-later](LICENSE). This fork descends from the MIT-licensed
+[`infiniumtek/terraform-review-agent`](https://github.com/infiniumtek/terraform-review-agent);
+that upstream copyright notice is preserved in [`NOTICE`](NOTICE).

@@ -1,15 +1,15 @@
 # AGENTS.md
 
-> Project contract for Codex / AI coding assistants. Replace `[PLACEHOLDERS]` per project; everything else is fixed standard.
+> Project contract for Codex / AI coding assistants. Kept in sync with [`CLAUDE.md`](CLAUDE.md) — same contract, different assistant.
 
 ---
 
 ## 1. Project
 
 - **Name:** `terraform-review-agent`
-- **Goal:** `A reusable GitHub Actions workflow that uses a LangGraph multi-agent system to review Terraform pull requests for security, cost, and style issues, posting a single severity-ranked comment.`
-- **Trigger:** `GitHub `pull_request` events (`opened`, `synchronize`, `reopened`, `ready_for_review`) on Terraform-file changes, via a reusable workflow consumed by other repos. Users: PR authors and reviewers. Secondary: `workflow_dispatch` for manual re-runs.`
-- **Framework:** `LangGraph`
+- **Goal:** A reusable GitHub Actions workflow that uses a LangGraph multi-agent system to review Terraform pull requests for security, cost, and style issues, posting a single severity-ranked comment.
+- **Trigger:** GitHub `pull_request` events (`opened`, `synchronize`, `reopened`, `ready_for_review`) on Terraform-file changes, via a reusable workflow consumed by other repos. Users: PR authors and reviewers. Secondary: `workflow_dispatch` for manual re-runs.
+- **Framework:** LangGraph
 
 ---
 
@@ -19,7 +19,7 @@
 - **Pydantic v2** for all state, tool I/O, and config schemas
 - **LangGraph** or **LangChain** 
 - **SQLite** checkpointer (`langgraph-checkpoint-sqlite`) if keeping state is required
-- **LLM providers: OpenAI, Anthropic, Google only** — selectable via config
+- **LLM providers: OpenAI, Anthropic, Google, Azure OpenAI** — selectable via config; plus an optional **GitHub Copilot** AI backend (reword-only)
 - **Docker** (compose) for reproducibility · `structlog` logging · `pytest` · `ruff` · `mypy --strict`
 
 ---
@@ -28,23 +28,31 @@
 
 Standard LangGraph src-layout (<https://docs.langchain.com/oss/python/langgraph/application-structure>):
 
-```
-[project]/
-├── AGENTS.md, README.md, .env.example, .gitignore, .python-version
+```text
+terraform-review-agent/
+├── AGENTS.md, CLAUDE.md, README.md, PLAN.md, .env.example, .gitignore, .python-version
 ├── pyproject.toml, uv.lock, langgraph.json
 ├── Dockerfile, docker-compose.yml, Makefile
-├── src/[package_name]/
+├── src/terraform_review_agent/
 │   ├── agent.py              # exposes compiled `agent` for langgraph.json
 │   ├── config.py             # Pydantic Settings (env-driven)
+│   ├── entrypoint.py         # CLI invoked by the GitHub Action (I/O boundary)
+│   ├── github_client.py      # fetch PR + diff; sticky-comment upsert
 │   ├── llm.py                # provider factory (OpenAI/Anthropic/Google)
-│   ├── utils/{state,nodes,tools,prompts}.py
-│   └── persistence/checkpointer.py
+│   ├── utils/lenses/         # pluggable review lenses + registry (security/cost/style/standards + A1/A2)
+│   ├── utils/sources/        # check-source normalizers: SARIF + coverage (lcov/cobertura/jacoco)
+│   ├── utils/standards/      # rule packs: finding→control mapping + gap detection (the moat)
+│   ├── utils/standardisers/  # wedge lenses A1 (terraform) + A2 (cicd): golden-standard diff + score
+│   ├── rule_packs/*.json     # versioned, cited rule packs (shipped with the engine)
+│   ├── standards_defs/*.json # golden A1/A2 definitions (house module + CI/CD baseline; shipped)
+│   └── utils/{state,nodes,tools,prompts,render,findings_report}.py
+├── schemas/findings.schema.json   # versioned findings-JSON output contract
+├── docs/                     # architecture & extension-point notes
 ├── tests/{unit,integration}/
-├── data/                     # SQLite, fixtures (gitignored if dynamic)
 └── scripts/                  # thin wrappers only — no business logic
 ```
 
-All importable code lives under `src/[package_name]/`. `agent.py` exposes the compiled graph as a module-level `agent` variable.
+All importable code lives under `src/terraform_review_agent/`. `agent.py` exposes the compiled graph as a module-level `agent` variable.
 
 ---
 
@@ -64,24 +72,59 @@ cp .env.example .env            # fill in keys
 
 ---
 
-## 5. Required env vars (`.env.example`)
+## 5. Required env vars
+
+[`.env.example`](.env.example) is the canonical, commented list — copy it to `.env` and fill in keys. Summary:
 
 ```env
-# At least one LLM key required
+AI_BACKEND=byok                      # byok (default) | copilot — reword-only either way
+# BYOK: at least one provider key (for the provider selected below)
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 GOOGLE_API_KEY=
+AZURE_API_KEY=                       # azure also needs endpoint + deployment
+AZURE_OPENAI_ENDPOINT=
+AZURE_OPENAI_DEPLOYMENT=
+# Copilot backend (only when AI_BACKEND=copilot): needs the Copilot CLI + token
+COPILOT_GITHUB_TOKEN=
+COPILOT_CLI_COMMAND=copilot
 
-DEFAULT_LLM_PROVIDER=anthropic        # openai | anthropic | google
-DEFAULT_LLM_MODEL=Codex-sonnet-4-5
+DEFAULT_LLM_PROVIDER=anthropic        # openai | anthropic | google | azure
+DEFAULT_LLM_MODEL=claude-sonnet-4-5   # pin a dated snapshot for reproducibility
 DEFAULT_LLM_TEMPERATURE=0.0
+DEFAULT_LLM_SEED=7                    # best-effort determinism (OpenAI); `none` to disable
+ENABLE_LLM_FINDINGS=false            # true lets the LLM invent findings (less deterministic)
+ENABLED_LENSES=                      # CSV of lens ids to run; empty = all (security,cost,style)
+# External SARIF check sources (empty = skip): prowler/gitleaks/trivy -> security, megalinter -> style
+PROWLER_SARIF_PATH=
+GITLEAKS_SARIF_PATH=
+TRIVY_SARIF_PATH=
+MEGALINTER_SARIF_PATH=
+COVERAGE_REPORT_PATH=                 # lcov/cobertura/jacoco, for the A3 lens
+ENABLED_RULE_PACKS=                   # empty=none · "*"=all · CSV of pack ids (e.g. terraform-cis-aws)
+RULE_PACKS_DIR=                       # optional dir of extra/custom rule packs
+# Wedge lenses (A1/A2): empty=off · "default"=built-in golden def · a path=custom JSON
+TERRAFORM_STANDARD=                   # A1 Terraform Standardiser (golden module structure)
+CICD_STANDARD=                        # A2 CI/CD Standardiser (.github/workflows posture)
 
 SQLITE_PATH=./data/state.sqlite
+
+# GitHub access (read PRs, post the sticky comment)
+GITHUB_TOKEN=
+GITHUB_REPOSITORY=
+GITHUB_PR_NUMBER=
+
+# Infracost cost agent (set the key to enable; leave blank to skip)
+INFRACOST_API_KEY=
+INFRACOST_BASELINE_PATH=
+
+FAIL_ON_SEVERITY=none                # critical | high | medium | low | info | none
+WORKSPACE_DIR=.                      # where the PR head is checked out
 
 # Optional observability
 LANGSMITH_API_KEY=
 LANGSMITH_TRACING=false
-LANGSMITH_PROJECT=[PROJECT_NAME]
+LANGSMITH_PROJECT=terraform-review-agent
 
 LOG_LEVEL=INFO
 ENVIRONMENT=development               # development | staging | production
@@ -91,9 +134,14 @@ ENVIRONMENT=development               # development | staging | production
 
 ## 6. Patterns (where things live)
 
-- **LLM factory** (`llm.py`): single `get_llm(provider, model, temperature)` switching on `openai|anthropic|google` using `langchain-openai`, `langchain-anthropic`, `langchain-google-genai`. Defaults from `config.settings`.
+- **LLM factory** (`llm.py`): single `get_llm(provider, model, temperature)` switching on `openai|anthropic|google|azure` using `langchain-openai` (OpenAI + `AzureChatOpenAI`), `langchain-anthropic`, `langchain-google-genai`. Defaults from `config.settings`.
+- **AI backend** (`ai/`): the swappable reword-only layer (Phase 6). `get_ai_backend()` returns the backend named by `AI_BACKEND` — `LangChainBackend` (BYOK, the default, over `get_llm`) or `CopilotBackend` (the GitHub Copilot CLI as a subprocess). The interface (`AIBackend.annotate(system, human) -> SpecialistAnnotations`) is the **guardrail**: the AI can only reword `message`/`suggestion`, never `severity`/`state`/`control_id`/`location` (enforced by the narrow return type, not by trusting the model). `annotate_with_llm` skips it when unavailable and catches any failure → the deterministic report still posts (graceful degradation, §9.2). The finding *set* is identical AI-on vs AI-off.
 - **State** (`utils/state.py`): Pydantic models. For LangGraph messages: `Annotated[list[AnyMessage], add_messages]`. No untyped dicts.
-- **Checkpointer** (`persistence/checkpointer.py`): `SqliteSaver.from_conn_string(settings.sqlite_path)`. Postgres only on explicit request.
+- **Checkpointer**: off for the MVP (one-shot CI run — no state kept between runs). If persistence is ever needed, add `src/terraform_review_agent/persistence/checkpointer.py` with `SqliteSaver.from_conn_string(settings.sqlite_path)` and the `langgraph-checkpoint-sqlite` dep. Postgres only on explicit request.
+- **Lenses** (`utils/lenses/`): each check is a `Lens` (`id` / `applies_to(state)` / `run(state) -> LensResult`); `registry.enabled_lenses(state)` picks which run (config `ENABLED_LENSES` ∩ applicable). `agent.py` fans out one `Send` per enabled lens into the `findings` reducer; the aggregator is deferred. Add a check = a new `Lens` subclass + a registry entry, no graph change.
+- **Standards** (`utils/standards/` + `rule_packs/`): versioned, cited rule packs map a finding's `{source}:{rule}` to a standard **control** and a three-state class (✅ verified / ◐ evidence / ○ human_only), and declare **expected artefacts** whose absence is a `human_only` finding (gap detection, via `StandardsLens`). The mapper runs at report-build time (`build_findings_report(mapper=…)`); active packs are chosen by `ENABLED_RULE_PACKS` (empty = inert). Add a standard = a new pack JSON, no code.
+- **Check sources** (`utils/sources/`): normalize external-tool output into `Finding`s. `sarif.py` parses any SARIF (MegaLinter, Prowler-IaC, gitleaks, Trivy) preserving the producing tool + rule id as `{source}:{rule}`; `coverage.py` parses lcov/cobertura/jacoco. Tools run as separate CI steps and write reports; the engine ingests them via `*_SARIF_PATH` settings (the ingestion `@tool`s in `tools.py`), self-skipping when unset.
+- **Wedge lenses** (`utils/standardisers/` + `standards_defs/`): the A-coded lenses (A1 Terraform, A2 CI/CD). Deterministic, no LLM — they diff a repo against a *golden definition* (`TerraformStandard` / `CICDBaseline`, versioned + cited JSON) and emit deviation findings + a consistency/posture score, stamping `lens="A1"|"A2"` (the `LensCode` on `Finding`). A2 parses workflow YAML with **PyYAML** (handle the `on:` → `True` boolean-key quirk). Each is inert unless `TERRAFORM_STANDARD` / `CICD_STANDARD` names a def (empty=off · `"default"`=built-in · path=custom); thin `Lens` wrappers in `utils/lenses/` gate on terraform changes like the standards lens. Add a wedge standard = a new def JSON, no code.
 - **Tools** (`utils/tools.py`): `@tool` from `langchain_core.tools` with Pydantic input schemas.
 - **Prompts** (`utils/prompts.py`): never inlined in node code.
 - **Config** (`config.py`): `pydantic_settings.BaseSettings` reading env — secrets never hardcoded.
@@ -121,7 +169,7 @@ Python targets invoke `./.venv/bin/...` — never bare `python`. `run` is the ex
 ```json
 {
   "dependencies": ["."],
-  "graphs": { "agent": "./src/[package_name]/agent.py:agent" },
+  "graphs": { "agent": "./src/terraform_review_agent/agent.py:agent" },
   "env": "./.env",
   "python_version": "3.13"
 }
@@ -150,7 +198,7 @@ Python targets invoke `./.venv/bin/...` — never bare `python`. `run` is the ex
 
 ## 12. Workflow when editing this project
 
-1. Read this file, then `pyproject.toml`, then `src/[package_name]/agent.py`
+1. Read this file, then `pyproject.toml`, then `src/terraform_review_agent/agent.py`
 2. Honor framework choice from §1
 3. Add Pydantic schemas to `utils/state.py` before writing node code
 4. New nodes in `utils/nodes.py`, wired in `agent.py`
@@ -161,7 +209,7 @@ Python targets invoke `./.venv/bin/...` — never bare `python`. `run` is the ex
 
 ## 13. Out of scope (stop and ask first)
 
-Cloud-managed DBs, vector stores, message queues · Kubernetes / Helm / Terraform · LLM providers other than OpenAI / Anthropic / Google · Frontend frameworks · Paid third-party APIs beyond LLMs.
+Cloud-managed DBs, vector stores, message queues · Kubernetes / Helm / Terraform · LLM providers other than OpenAI / Anthropic / Google / Azure OpenAI (+ the GitHub Copilot reword backend) · Frontend frameworks · Paid third-party APIs beyond LLMs.
 
 ---
 

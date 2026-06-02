@@ -7,34 +7,37 @@ name = "terraform-review-agent"
 version = "1.0.0"
 description = "LangGraph multi-agent reviewer for Terraform pull requests."
 requires-python = ">=3.13,<3.14"
-license = { text = "MIT" }
-authors = [{ name = "spanosg131" }]
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "ignatg" }]
 dependencies = [
-    "langgraph>=0.2.50",
-    "langchain-core>=0.3.0",
-    "langchain-openai>=0.2.0",
-    "langchain-anthropic>=0.2.0",
-    "langchain-google-genai>=2.0.0",
-    "pydantic>=2.8",
-    "pydantic-settings>=2.4",
-    "structlog>=24.4",
-    "httpx>=0.27",
+    "langgraph>=1.2",
+    "langchain-core>=1.4",
+    "langchain-openai>=1.2",
+    "langchain-anthropic>=1.4",
+    "langchain-google-genai>=4.2",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.14",
+    "structlog>=25.4",
+    "httpx>=0.28",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.6",
-    "mypy>=1.11",
+    "pytest>=9.0",
+    "pytest-asyncio>=1.4",
+    "ruff>=0.15",
+    "mypy>=2.1",
     "types-requests",
+    "types-pyyaml",
+    "jsonschema>=4.26",
 ]
 # Scanner installed into the container image (kept out of the default/dev
 # install — local unit tests mock the checkov subprocess). Pinned here so the
 # lockfile captures checkov *and its transitive tree*; the binary scanners
 # (terraform/tfsec/tflint/infracost) stay pinned via Dockerfile ARGs.
 container = [
-    "checkov==3.2.529",
+    "checkov==3.2.531",
 ]
 
 [tool.hatch.build.targets.wheel]

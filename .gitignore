@@ -13,6 +13,9 @@ __pycache__/
 .env
 .env.local
 
+# Findings report (output contract) — written per run, not committed
+findings.json
+
 # Data / state
 data/*.sqlite
 data/*.sqlite-journal

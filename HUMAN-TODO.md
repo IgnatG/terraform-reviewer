@@ -1,0 +1,41 @@
+# Human action items
+
+Things only **you** can do — they need live credentials, real repositories, an
+external runtime, or a human judgement call I can't make. Pulled out of
+[`assessor-build-plan.md`](assessor-build-plan.md) so they don't get lost as the
+engineering phases tick off. The engine-side work for each is already done; what
+remains here is verification / dogfooding / curation.
+
+> Legend: `[ ]` todo · `[x]` done. Add the date + a note when you close one.
+
+## Verification (needs creds / a live PR / a push)
+
+- [ ] **Run the reviewer on a real PR and confirm the sticky comment posts.**
+  Needs a throwaway repo + a `GITHUB_TOKEN` (with `pull-requests: write`) + at
+  least one LLM key. Enable the wedge lenses too (`terraform-standard: default`,
+  `cicd-standard: default`) to see A1/A2 in the comment. *(Phase 0 + Phase 5)*
+- [ ] **Confirm the CI workflow runs green end-to-end on GitHub Actions.**
+  Local is green (202/202), but a push is needed to prove the `terraform-review.yml`
+  reusable workflow + the GHCR image run in Actions. *(Phase 0)*
+
+## Dogfooding (needs your real repos + judgement)
+
+- [ ] **Dogfood A1 + A2 on ≥3 of your own client repos.** Enable with
+  `terraform-standard: default` / `cicd-standard: default` (see
+  [`examples/README.md`](examples/README.md)) and sanity-check the consistency /
+  posture scores + deviation lists against your manual read. Tune the golden
+  definitions (commit a custom JSON) where the defaults don't match your house
+  standard. *(Phase 5 "Done when")*
+
+## AI backend (needs the Copilot CLI + a PAT) — _added when Phase 6 lands_
+
+- [ ] **Verify the GitHub Copilot backend against a live PAT.** Needs Node + the
+  Copilot CLI installed alongside the engine and a `COPILOT_GITHUB_TOKEN`. BYOK
+  (OpenAI/Anthropic/Gemini/Azure) is the tested default and needs nothing extra.
+  *(Phase 6 "Done when" — Copilot half)*
+
+## Rule-pack curation (ongoing, needs a human owner) — _future (Phase 9)_
+
+- [ ] Stand up rule-pack curation as a first-class workstream: refresh cadence +
+  a citation/version trail, and validate every rule against the **live** standard
+  before publishing. *(Phase 9)*
