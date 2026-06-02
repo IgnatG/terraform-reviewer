@@ -67,7 +67,7 @@ on:
 
 jobs:
   terraform-review:
-    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1
+    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1.0.0
     permissions:
       contents: read          # checkout
       pull-requests: write    # post/edit the sticky comment
@@ -171,7 +171,7 @@ edited in place.
 ```
 GitHub PR event
   └─► reusable workflow (terraform-review.yml)
-        └─► container: ghcr.io/ignatg/terraform-reviewer:v1
+        └─► container: ghcr.io/ignatg/terraform-reviewer:v1.0.0
               └─► python -m terraform_review_agent.entrypoint
                     └─► LangGraph:
                           start ─► [lens ∥ lens ∥ …] ─► aggregator ─► post_comment
