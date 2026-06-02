@@ -22,6 +22,7 @@ import html
 from collections import Counter
 from urllib.parse import quote
 
+from terraform_review_agent.utils.findings_report import FindingRecord
 from terraform_review_agent.utils.state import (
     SEVERITY_ORDER,
     AgentName,
@@ -30,6 +31,10 @@ from terraform_review_agent.utils.state import (
     PRContext,
     Severity,
 )
+
+# Three-state badges for the readiness section (Phase 8).
+_STATE_BADGE: dict[str, str] = {"verified": "✅", "evidence": "◐", "human_only": "○"}
+_STATE_ORDER: tuple[str, ...] = ("verified", "evidence", "human_only")
 
 # Severities shown inline, in display order. ``low``/``info`` are collapsed.
 VISIBLE_SEVERITIES: tuple[Severity, ...] = ("critical", "high", "medium")
@@ -56,13 +61,39 @@ _AGENT_LABELS: dict[AgentName, str] = {
     "security": "Security",
     "cost": "Cost",
     "style": "Style",
+    "standards": "Standards",
+    "terraform-standard": "Terraform Std",
+    "cicd": "CI/CD",
+    "coverage": "Coverage",
+    "tech-debt": "Tech Debt",
+    "gds": "GDS",
 }
 _AGENT_EMOJI: dict[AgentName, str] = {
     "security": "🔒",
     "cost": "💰",
     "style": "🎨",
+    "standards": "📋",
+    "terraform-standard": "🏗️",
+    "cicd": "⚙️",
+    "coverage": "🧪",
+    "tech-debt": "🧹",
+    "gds": "🇬🇧",
 }
-_AGENT_ORDER: tuple[AgentName, ...] = ("security", "cost", "style")
+_AGENT_ORDER: tuple[AgentName, ...] = (
+    "security",
+    "cost",
+    "style",
+    "standards",
+    "terraform-standard",
+    "cicd",
+    "coverage",
+    "tech-debt",
+    "gds",
+)
+
+# Str-keyed copy of the agent labels for the readiness lookup (a FindingRecord's
+# ``category`` is a plain str, not the AgentName literal that keys _AGENT_LABELS).
+_AREA_LABELS: dict[str, str] = {str(name): label for name, label in _AGENT_LABELS.items()}
 
 _NO_FINDINGS = "No issues found in the changed Terraform files."
 
@@ -248,12 +279,69 @@ def _collapsed_section(pr: PRContext, findings: list[Finding]) -> list[str]:
     return parts
 
 
+def _readiness_group(record: FindingRecord) -> str:
+    """The standard a record rolls up under in the readiness view, else its lens area."""
+
+    if record.standard:
+        version = f" {record.standard_version}" if record.standard_version else ""
+        return f"{record.standard}{version}"
+    return _AREA_LABELS.get(record.category, record.category)
+
+
+def _readiness_section(records: list[FindingRecord]) -> list[str]:
+    """A ✅/◐/○-by-area tally + a "needs a human" list, from the mapped report.
+
+    Only rendered when there's a three-state story to tell (a mapped standard, an
+    A-coded lens, or any non-``verified`` finding); a plain security/style PR has
+    none, so the comment is unchanged for that common case.
+    """
+
+    if not any(r.standard or r.lens or r.state != "verified" for r in records):
+        return []
+
+    tally: dict[str, Counter[str]] = {}
+    for r in records:
+        tally.setdefault(_readiness_group(r), Counter())[r.state] += 1
+
+    parts = [
+        "### 📊 Standards readiness",
+        "",
+        "| Area | ✅ Verified | ◐ Evidence | ○ Human only |",
+        "|:--|:--|:--|:--|",
+    ]
+    for area, counts in tally.items():
+        cells = " | ".join(str(counts.get(state, 0)) for state in _STATE_ORDER)
+        parts.append(f"| {_cell(area)} | {cells} |")
+    parts.append("")
+
+    # Surface what a human must still check (evidence + human_only), so the
+    # ✅ tally is never mistaken for full coverage.
+    needs_human = [r for r in records if r.state != "verified"]
+    if needs_human:
+        parts.append("<details>")
+        parts.append(f"<summary>Needs a human ({len(needs_human)})</summary>")
+        parts.append("")
+        for r in needs_human:
+            control = f" `{_code(r.control_id)}`" if r.control_id else ""
+            parts.append(f"- {_STATE_BADGE[r.state]}{control} {_inline(r.evidence)}")
+        parts.append("")
+        parts.append("</details>")
+        parts.append("")
+    return parts
+
+
 def render_comment(
     findings: list[Finding],
     pr: PRContext,
     cost_summary: CostSummary | None = None,
+    records: list[FindingRecord] | None = None,
 ) -> str:
-    """Render the full sticky-comment body for ``pr`` (marker added by caller)."""
+    """Render the full sticky-comment body for ``pr`` (marker added by caller).
+
+    ``records`` are the mapped findings-report records; when given they drive an
+    extra ✅/◐/○ "Standards readiness" section (Phase 8). Omitting them keeps the
+    plain severity-table comment (back-compatible).
+    """
 
     ordered = sort_findings(dedupe_findings(findings))
     parts: list[str] = ["## Terraform Review Agent", ""]
@@ -266,6 +354,8 @@ def render_comment(
     parts.extend(_summary_lines(ordered))
     parts.append("")
     parts.extend(_cost_callout(cost_summary))
+    if records is not None:
+        parts.extend(_readiness_section(records))
     parts.extend(_severity_sections(pr, ordered))
     parts.extend(_collapsed_section(pr, ordered))
 

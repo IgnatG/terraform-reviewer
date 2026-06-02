@@ -53,6 +53,57 @@ def _f(
 
 
 # ---------------------------------------------------------------------------
+# Phase 8 — three-state readiness section
+# ---------------------------------------------------------------------------
+
+
+def test_readiness_section_renders_when_states_present() -> None:
+    from terraform_review_agent.utils.findings_report import build_findings_report
+    from terraform_review_agent.utils.standards import StandardMapper
+    from terraform_review_agent.utils.standards.pack import Control, RuleMapping, RulePack
+
+    pack = RulePack(
+        id="cis",
+        standard="CIS AWS",
+        standard_version="3.0.0",
+        rule_pack_version="2026.06.0",
+        controls=[Control(id="2.1.1", title="enc", state="verified")],
+        mappings=[RuleMapping(control_id="2.1.1", rule="tfsec:x")],
+    )
+    findings = [
+        _f(rule="tfsec:x", message="mapped verified"),
+        Finding(
+            agent="gds",
+            lens="A5",
+            severity="info",
+            file=".",
+            rule="gds:wcag",
+            message="needs manual review",
+            state="human_only",
+        ),
+    ]
+    report = build_findings_report(
+        pr=_pr(), findings=findings, cost_summary=None, mapper=StandardMapper([pack])
+    )
+    md = render_comment(findings, _pr(), None, records=report.findings)
+
+    assert "### 📊 Standards readiness" in md
+    assert "CIS AWS 3.0.0" in md  # standard group
+    assert "Needs a human (1)" in md  # the human_only point is surfaced
+    assert "needs manual review" in md
+
+
+def test_readiness_section_absent_for_plain_findings() -> None:
+    # No standard, no lens, all verified -> the comment is unchanged (no section).
+    findings = [_f(rule="tfsec:x", message="plain")]
+    from terraform_review_agent.utils.findings_report import build_findings_report
+
+    report = build_findings_report(pr=_pr(), findings=findings, cost_summary=None)
+    md = render_comment(findings, _pr(), None, records=report.findings)
+    assert "Standards readiness" not in md
+
+
+# ---------------------------------------------------------------------------
 # dedupe
 # ---------------------------------------------------------------------------
 

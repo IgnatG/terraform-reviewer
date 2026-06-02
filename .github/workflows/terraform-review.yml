@@ -28,6 +28,38 @@ on:
           critical | high | medium | low | info | none. Default never fails.
         type: string
         default: none
+      terraform-standard:
+        description: >-
+          A1 Terraform Standardiser: "default" for the built-in house standard,
+          or a repo-relative path to a custom definition JSON. Empty = off.
+        type: string
+        default: ""
+      cicd-standard:
+        description: >-
+          A2 CI/CD Standardiser: "default" for the built-in baseline, or a
+          repo-relative path to a custom definition JSON. Empty = off.
+        type: string
+        default: ""
+      gds-standard:
+        description: >-
+          A5 GDS Readiness Scanner: "default" for the built-in points, or a
+          repo-relative path to a custom definition JSON. Empty = off.
+        type: string
+        default: ""
+      coverage-report-path:
+        description: >-
+          A3: path to a coverage report (lcov/cobertura/jacoco) your CI produced.
+          Empty = the coverage lens is off.
+        type: string
+        default: ""
+      jscpd-report-path:
+        description: "A4: path to a jscpd duplication JSON report. Empty = skip."
+        type: string
+        default: ""
+      sonarqube-sarif-path:
+        description: "A4: path to a SonarQube SARIF export. Empty = skip."
+        type: string
+        default: ""
       pr-number:
         description: >-
           PR to review. Defaults to the triggering pull_request event; pass it
@@ -61,9 +93,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      security-events: write # upload the SARIF to the code-scanning tab
 
     container:
-      image: ghcr.io/spanosg131/terraform-review-agent:v1
+      image: ghcr.io/ignatg/terraform-review-agent:v1
       # The image ships a non-root `app` user, but GitHub-hosted container jobs
       # mount the workspace (and the $GITHUB_ENV/$GITHUB_OUTPUT command files) as
       # uid 1001, which a non-root container user cannot write. Run as root so
@@ -76,6 +109,14 @@ jobs:
       DEFAULT_LLM_PROVIDER: ${{ inputs.llm-provider }}
       DEFAULT_LLM_MODEL: ${{ inputs.llm-model }}
       FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
+      # Wedge lenses (Phase 5) — off unless the caller names a definition.
+      TERRAFORM_STANDARD: ${{ inputs.terraform-standard }}
+      CICD_STANDARD: ${{ inputs.cicd-standard }}
+      # Repo lenses (Phase 7) — each off unless its definition/report is supplied.
+      GDS_STANDARD: ${{ inputs.gds-standard }}
+      COVERAGE_REPORT_PATH: ${{ inputs.coverage-report-path }}
+      JSCPD_REPORT_PATH: ${{ inputs.jscpd-report-path }}
+      SONARQUBE_SARIF_PATH: ${{ inputs.sonarqube-sarif-path }}
       OPENAI_API_KEY: ${{ secrets.openai-api-key }}
       ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
       GOOGLE_API_KEY: ${{ secrets.google-api-key }}
@@ -110,7 +151,33 @@ jobs:
 
       - name: Review Terraform changes
         # PR_NUMBER is exported via $GITHUB_ENV by the resolve step above.
+        # Writes ./findings.json (the versioned output contract) alongside the
+        # sticky comment; the upload step below publishes it as an artefact.
         run: |
           python -m terraform_review_agent.entrypoint \
             --repository "$GITHUB_REPOSITORY" \
             --pr-number "$PR_NUMBER"
+
+      - name: Upload findings + evidence pack artefacts
+        # Always upload, even when the review gates CI (exit 2) — the findings
+        # report is the contract downstream consumers (dashboard, Remediator) read,
+        # and the evidence pack (HTML/CSV) is the downloadable ✅/◐/○ deliverable.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-review-findings
+          path: |
+            findings.json
+            findings.sarif
+            findings.csv
+            evidence-pack.html
+          if-no-files-found: warn
+
+      - name: Upload SARIF to code-scanning
+        # Lands the findings in the repo's Security → Code scanning tab + inline
+        # PR annotations. Best-effort: never fail the review if the upload can't run.
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: findings.sarif

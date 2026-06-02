@@ -75,4 +75,23 @@ def get_llm(
             google_api_key=api_key,
         )
 
+    if chosen_provider == "azure":
+        from langchain_openai import AzureChatOpenAI
+
+        if not settings.azure_openai_endpoint:
+            raise RuntimeError(
+                "Azure provider selected but AZURE_OPENAI_ENDPOINT is unset. "
+                "Set the endpoint (and AZURE_OPENAI_DEPLOYMENT) to use Azure OpenAI."
+            )
+        # Azure routes by *deployment* name, not model; fall back to the model id
+        # when no explicit deployment is configured.
+        return AzureChatOpenAI(
+            azure_deployment=settings.azure_openai_deployment or chosen_model,
+            azure_endpoint=settings.azure_openai_endpoint,
+            api_version=settings.azure_openai_api_version,
+            api_key=api_key,
+            temperature=chosen_temperature,
+            seed=chosen_seed,
+        )
+
     raise ValueError(f"Unsupported LLM provider: {chosen_provider!r}")

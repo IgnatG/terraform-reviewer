@@ -34,8 +34,23 @@ remains here is verification / dogfooding / curation.
   (OpenAI/Anthropic/Gemini/Azure) is the tested default and needs nothing extra.
   *(Phase 6 "Done when" — Copilot half)*
 
-## Rule-pack curation (ongoing, needs a human owner) — _future (Phase 9)_
+## Dashboard (needs the hosted ingest endpoint + a key) — _added when Phase 9 lands_
 
-- [ ] Stand up rule-pack curation as a first-class workstream: refresh cadence +
-  a citation/version trail, and validate every rule against the **live** standard
-  before publishing. *(Phase 9)*
+- [ ] **Confirm scans land in the live dashboard.** Set `DASHBOARD_INGEST_URL`
+  (+ `DASHBOARD_API_KEY`) and verify a scan appears with per-standard readiness.
+  The engine side is done + unit-tested (opt-in + best-effort POST of the
+  findings contract); this needs the hosted ingest endpoint stood up. *(Phase 9
+  "Done when" — the live half.)*
+
+## Rule-pack curation (ongoing, needs a human owner) — _Phase 9_
+
+The process is written up in [`docs/rule-pack-curation.md`](docs/rule-pack-curation.md)
+(definition kinds, the four-point shipping bar, refresh cadence, authoring steps).
+What's left is the *people* part:
+
+- [ ] **Name an owner** and stand up the **quarterly + event-driven refresh
+  cadence** for the shipped packs.
+- [ ] **Validate every rule against the live standard before publishing.** The
+  bar + load-time checks exist; the actual judgement pass (re-resolve each
+  `source_url`, confirm each rule still matches the current standard text, confirm
+  the ✅/◐/○ classification is honest) is a human read. *(Phase 9 §9.1.)*

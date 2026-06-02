@@ -17,6 +17,7 @@ from terraform_review_agent.entrypoint import (
     GATING_EXIT_CODE,
     _ensure_workspace,
     _max_severity_finding,
+    _post_to_dashboard,
 )
 from terraform_review_agent.utils.state import Finding, PRContext, ReviewState
 
@@ -40,7 +41,7 @@ def _finding(severity: str, rule: str = "r") -> Finding:
 
 
 def _state(*, findings: list[Finding], skipped: bool = False) -> ReviewState:
-    return ReviewState(pr=_pr(), security=findings, skipped=skipped)
+    return ReviewState(pr=_pr(), findings=findings, skipped=skipped)
 
 
 # ---------------------------------------------------------------------------
@@ -128,3 +129,54 @@ def test_ensure_workspace_clones_when_not_a_checkout(
     monkeypatch.setattr(entrypoint, "_clone_pr_workspace", lambda _pr_arg: "/tmp/cloned-ws")
 
     assert _ensure_workspace(_pr(), str(tmp_path)) == "/tmp/cloned-ws"
+
+
+# ---------------------------------------------------------------------------
+# _post_to_dashboard (Phase 9)
+# ---------------------------------------------------------------------------
+
+
+def test_post_to_dashboard_noop_without_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No findings_report_json => nothing to post; must not even build a client.
+    def _boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("must not construct a client when there's no report")
+
+    monkeypatch.setattr(entrypoint.DashboardClient, "from_settings", _boom)
+    _post_to_dashboard(_state(findings=[]))  # findings_report_json is None here
+
+
+def test_post_to_dashboard_noop_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A report exists but no dashboard is configured => from_settings returns None.
+    monkeypatch.setattr(entrypoint.DashboardClient, "from_settings", lambda *a, **k: None)
+    state = _state(findings=[]).model_copy(update={"findings_report_json": '{"x": 1}'})
+    _post_to_dashboard(state)  # no client, no parse, no raise
+
+
+def test_post_to_dashboard_posts_parsed_report_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The wiring: a configured client receives the report parsed from the state's
+    # findings_report_json (not the raw string, not a re-shaped payload).
+    from terraform_review_agent.utils.findings_report import (
+        FindingsReport,
+        build_findings_report,
+        render_findings_json,
+    )
+
+    report = build_findings_report(pr=_pr(), findings=[_finding("high")], cost_summary=None)
+    posted: list[FindingsReport] = []
+
+    class _FakeClient:
+        def post_report(self, report: FindingsReport) -> bool:
+            posted.append(report)
+            return True
+
+    monkeypatch.setattr(entrypoint.DashboardClient, "from_settings", lambda *a, **k: _FakeClient())
+    state = _state(findings=[]).model_copy(
+        update={"findings_report_json": render_findings_json(report)}
+    )
+    _post_to_dashboard(state)
+
+    assert len(posted) == 1
+    assert posted[0].scan.repository == "acme/example"
+    assert posted[0].summary.total == 1

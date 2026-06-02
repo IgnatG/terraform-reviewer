@@ -9,13 +9,13 @@ only two boundaries faked:
   checkov / tflint / terraform-fmt / infracost JSON) instead of shelling out.
   The real parsers, severity normalization, path scoping, dedupe, and markdown
   renderer all run.
-* **LLM** — ``nodes.get_llm`` returns a fake whose structured-output call
-  records the prompt and returns a canned :class:`SpecialistAnnotations`. No
-  network, no API key.
+* **LLM** — ``lenses._annotate.get_llm`` returns a fake whose structured-output
+  call records the prompt and returns a canned :class:`SpecialistAnnotations`.
+  No network, no API key.
 
 So a passing test means: recorded scanner output → real parse → fan-out across
-the three specialists → real aggregate/dedupe/render → final comment markdown,
-all wired through the compiled graph exactly as production runs it.
+the lenses → real aggregate/dedupe/render → final comment markdown, all wired
+through the compiled graph exactly as production runs it.
 """
 
 from __future__ import annotations
@@ -30,13 +30,25 @@ from pydantic import SecretStr
 
 from terraform_review_agent import entrypoint
 from terraform_review_agent.agent import agent
-from terraform_review_agent.utils import nodes
+from terraform_review_agent.config import settings
+from terraform_review_agent.utils.lenses import _annotate
+from terraform_review_agent.utils.lenses import cost as cost_mod
+from terraform_review_agent.utils.lenses import security as security_mod
+from terraform_review_agent.utils.lenses import style as style_mod
 from terraform_review_agent.utils.state import (
     ChangedFile,
+    Finding,
     PRContext,
     ReviewState,
     SpecialistAnnotations,
 )
+
+
+def _by_agent(final: ReviewState, agent: str) -> list[Finding]:
+    """The final findings produced by one lens (now merged into one list)."""
+
+    return [f for f in final.all_findings() if f.agent == agent]
+
 
 # ---------------------------------------------------------------------------
 # recorded scanner output (the bytes a real scanner would print on stdout)
@@ -144,38 +156,34 @@ def _fake_scanner_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedPro
     raise AssertionError(f"unexpected scanner invocation: {cmd!r}")
 
 
-class _FakeStructured:
-    """Records the prompt it was handed and returns a canned annotation set."""
+class _FakeBackend:
+    """No-op AI backend: records the (system, human) prompts, returns a canned result."""
 
-    def __init__(self, result: SpecialistAnnotations, calls: list[list[Any]]) -> None:
+    def __init__(self, result: SpecialistAnnotations, calls: list[tuple[str, str]]) -> None:
         self._result = result
         self._calls = calls
 
-    def invoke(self, messages: list[Any]) -> SpecialistAnnotations:
-        self._calls.append(messages)
+    def available(self) -> bool:
+        return True
+
+    def annotate(self, system: str, human: str) -> SpecialistAnnotations:
+        self._calls.append((system, human))
         return self._result
 
 
-class _FakeLLM:
-    def __init__(self, result: SpecialistAnnotations, calls: list[list[Any]]) -> None:
-        self._result = result
-        self._calls = calls
-
-    def with_structured_output(self, _schema: Any) -> _FakeStructured:
-        return _FakeStructured(self._result, self._calls)
-
-
 @pytest.fixture
-def llm_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[Any]]:
-    """Patch ``get_llm`` with a no-op annotator; return the recorded prompts.
+def llm_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    """Patch the AI backend with a no-op annotator; return the recorded prompts.
 
     Annotations are empty, so every scanner finding keeps its own wording — the
     finding *set* and severities under test come entirely from the (recorded)
     scanners, which is the contract these tests assert.
     """
 
-    calls: list[list[Any]] = []
-    monkeypatch.setattr(nodes, "get_llm", lambda *a, **k: _FakeLLM(SpecialistAnnotations(), calls))
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        _annotate, "get_ai_backend", lambda: _FakeBackend(SpecialistAnnotations(), calls)
+    )
     return calls
 
 
@@ -183,7 +191,7 @@ def llm_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[Any]]:
 def recorded_scanners(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the real scanner wrappers run against recorded output, not binaries."""
 
-    monkeypatch.setattr(nodes, "build_synced_usage_file", lambda _wd: None)
+    monkeypatch.setattr(cost_mod, "build_synced_usage_file", lambda _wd: None)
     # Every scanner binary "exists"; subprocess returns recorded stdout.
     import terraform_review_agent.utils.tools as tools
 
@@ -223,8 +231,8 @@ def test_full_review_renders_every_severity(
     llm_calls: list[list[Any]],
     recorded_scanners: None,
 ) -> None:
-    monkeypatch.setattr(nodes.settings, "infracost_api_key", SecretStr("ico-key"))
-    monkeypatch.setattr(nodes.settings, "enable_llm_findings", False)
+    monkeypatch.setattr(settings, "infracost_api_key", SecretStr("ico-key"))
+    monkeypatch.setattr(settings, "enable_llm_findings", False)
     workspace = _write_workspace(tmp_path)
 
     state = ReviewState(
@@ -237,15 +245,15 @@ def test_full_review_renders_every_severity(
 
     assert final.skipped is False
 
-    # Each branch surfaced its recorded findings, scoped to the changed file.
-    assert [f.rule for f in final.security] == [
+    # Each lens surfaced its recorded findings, scoped to the changed file.
+    assert [f.rule for f in _by_agent(final, "security")] == [
         "tfsec:aws-s3-enable-bucket-encryption",
         "checkov:CKV_AWS_18",
     ]
-    assert [(f.rule, f.severity) for f in final.cost] == [
+    assert [(f.rule, f.severity) for f in _by_agent(final, "cost")] == [
         ("infracost:resource-delta", "high"),  # +$120/mo crosses the high floor
     ]
-    assert {f.rule for f in final.style} == {
+    assert {f.rule for f in _by_agent(final, "style")} == {
         "tflint:terraform_unused_declarations",
         "terraform-fmt:unformatted",
     }
@@ -257,7 +265,7 @@ def test_full_review_renders_every_severity(
     # The LLM annotator was consulted once per specialist that had findings.
     assert len(llm_calls) == 3
     # The file content reached the LLM prompt (real prepare_file_payloads ran).
-    assert any("aws_s3_bucket" in m[1].content for m in llm_calls)
+    assert any("aws_s3_bucket" in human for _system, human in llm_calls)
 
     md = final.comment_markdown
     assert md is not None
@@ -280,7 +288,7 @@ def test_no_findings_renders_all_clear(
     llm_calls: list[list[Any]],
     monkeypatched_clean_scanners: None,
 ) -> None:
-    monkeypatch.setattr(nodes.settings, "infracost_api_key", None)  # cost agent skips
+    monkeypatch.setattr(settings, "infracost_api_key", None)  # cost agent skips
     workspace = _write_workspace(tmp_path)
 
     state = ReviewState(
@@ -310,8 +318,8 @@ def test_llm_rewording_reaches_comment(
     recorded_scanners: None,
 ) -> None:
     # Only tfsec reports, so the security finding is id 0 deterministically.
-    monkeypatch.setattr(nodes.settings, "infracost_api_key", None)
-    monkeypatch.setattr(nodes.settings, "enable_llm_findings", False)
+    monkeypatch.setattr(settings, "infracost_api_key", None)
+    monkeypatch.setattr(settings, "enable_llm_findings", False)
 
     from terraform_review_agent.utils.state import FindingAnnotation
 
@@ -324,11 +332,11 @@ def test_llm_rewording_reaches_comment(
             )
         ]
     )
-    monkeypatch.setattr(nodes, "get_llm", lambda *a, **k: _FakeLLM(reworded, []))
+    monkeypatch.setattr(_annotate, "get_ai_backend", lambda: _FakeBackend(reworded, []))
 
     # Style scanners report nothing here so the security rewording is unambiguous.
-    monkeypatch.setattr(nodes, "run_tflint", _StubTool([]))
-    monkeypatch.setattr(nodes, "run_terraform_fmt", _StubTool([]))
+    monkeypatch.setattr(style_mod, "run_tflint", _StubTool([]))
+    monkeypatch.setattr(style_mod, "run_terraform_fmt", _StubTool([]))
 
     workspace = _write_workspace(tmp_path)
     state = ReviewState(
@@ -338,7 +346,7 @@ def test_llm_rewording_reaches_comment(
 
     final = ReviewState.model_validate(agent.invoke(state))
 
-    f = final.security[0]
+    f = _by_agent(final, "security")[0]
     # Scanner still owns severity/rule; only the prose was rewritten.
     assert f.severity == "critical"
     assert f.rule == "tfsec:aws-s3-enable-bucket-encryption"
@@ -353,15 +361,15 @@ def test_llm_rewording_reaches_comment(
 
 
 def test_non_terraform_pr_short_circuits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    def _boom_llm(*_a: Any, **_k: Any) -> Any:
-        raise AssertionError("LLM must not run when no terraform changed")
+    def _boom_backend(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("AI backend must not run when no terraform changed")
 
     def _boom_run(*_a: Any, **_k: Any) -> Any:
         raise AssertionError("scanners must not run when no terraform changed")
 
     import terraform_review_agent.utils.tools as tools
 
-    monkeypatch.setattr(nodes, "get_llm", _boom_llm)
+    monkeypatch.setattr(_annotate, "get_ai_backend", _boom_backend)
     monkeypatch.setattr(tools.subprocess, "run", _boom_run)
 
     state = ReviewState(
@@ -404,20 +412,31 @@ def test_entrypoint_run_posts_sticky_comment(
     recorded_scanners: None,
 ) -> None:
     # Cost off so this test stays focused on fetch -> graph -> upsert.
-    monkeypatch.setattr(nodes.settings, "infracost_api_key", None)
-    monkeypatch.setattr(nodes.settings, "enable_llm_findings", False)
+    monkeypatch.setattr(settings, "infracost_api_key", None)
+    monkeypatch.setattr(settings, "enable_llm_findings", False)
 
     # Existing git checkout => entrypoint uses it as-is (no clone).
     workspace = _write_workspace(tmp_path)
     (workspace / ".git").mkdir()
     monkeypatch.setattr(entrypoint.settings, "workspace_dir", str(workspace))
     monkeypatch.setattr(entrypoint.settings, "infracost_baseline_path", None)
+    # Redirect every output surface into the tmp dir (don't write to the repo).
+    out = tmp_path / "out"
+    monkeypatch.setattr(entrypoint.settings, "findings_output_path", str(out / "findings.json"))
+    monkeypatch.setattr(entrypoint.settings, "sarif_output_path", str(out / "findings.sarif"))
+    monkeypatch.setattr(entrypoint.settings, "evidence_html_path", str(out / "evidence.html"))
+    monkeypatch.setattr(entrypoint.settings, "evidence_csv_path", str(out / "findings.csv"))
 
     pr = _pr([ChangedFile(path="main.tf")])
     client = _FakeGitHubClient(pr)
 
     final = entrypoint.run("acme/infra", 42, client=client)  # type: ignore[arg-type]
 
+    # All four output surfaces are written from the one report (Phase 8).
+    assert (out / "findings.json").is_file()
+    assert (out / "findings.sarif").is_file()
+    assert (out / "evidence.html").is_file()
+    assert (out / "findings.csv").is_file()
     assert final.posted_comment_id == 9999
     assert len(client.upserts) == 1
     repo, pr_number, body = client.upserts[0]
@@ -447,6 +466,8 @@ class _StubTool:
 def monkeypatched_clean_scanners(monkeypatch: pytest.MonkeyPatch) -> None:
     """All scanners present but reporting nothing — exercises the all-clear path."""
 
-    monkeypatch.setattr(nodes, "build_synced_usage_file", lambda _wd: None)
-    for name in ("run_tfsec", "run_checkov", "run_tflint", "run_terraform_fmt"):
-        monkeypatch.setattr(nodes, name, _StubTool([]))
+    monkeypatch.setattr(cost_mod, "build_synced_usage_file", lambda _wd: None)
+    monkeypatch.setattr(security_mod, "run_tfsec", _StubTool([]))
+    monkeypatch.setattr(security_mod, "run_checkov", _StubTool([]))
+    monkeypatch.setattr(style_mod, "run_tflint", _StubTool([]))
+    monkeypatch.setattr(style_mod, "run_terraform_fmt", _StubTool([]))

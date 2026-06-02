@@ -31,7 +31,10 @@ import structlog
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
+from terraform_review_agent.config import settings
+from terraform_review_agent.utils.sources.sarif import parse_sarif
 from terraform_review_agent.utils.state import (
+    AgentName,
     ChangedFile,
     CostReport,
     CostSummary,
@@ -108,7 +111,12 @@ def _relpath(raw_path: str, working_dir: Path) -> str:
             return p.relative_to(working_dir.resolve()).as_posix()
         except ValueError:
             return p.as_posix().lstrip("/")
-    return p.as_posix()
+    # A POSIX-style leading slash ("/main.tf") is how checkov signals
+    # "relative to the scanned dir". On Linux that path is absolute and handled
+    # above; on Windows it isn't (no drive), so strip the leading slash here so
+    # the behaviour is identical on both platforms.
+    posix = p.as_posix()
+    return posix.lstrip("/") if posix.startswith("/") else posix
 
 
 # ---------------------------------------------------------------------------
@@ -567,11 +575,98 @@ def build_infracost_baseline(
             check=False,
         )
 
-    data = json.loads(out_file.read_text())
+    # Guard the read: a FileNotFoundError/JSON error here is not a ScannerError,
+    # so without this it would escape the cost lens's ScannerError handler and
+    # crash the whole review instead of skipping cost.
+    if not out_file.is_file():
+        raise ScannerError("infracost breakdown produced no baseline output file")
+    try:
+        data = json.loads(out_file.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ScannerError(f"infracost baseline output unreadable: {exc}") from exc
     for project in data.get("projects") or []:
         project["name"] = project_name
     out_file.write_text(json.dumps(data))
     return str(out_file)
+
+
+# ---------------------------------------------------------------------------
+# external check sources (SARIF ingestion) — Phase 3
+#
+# These tools (MegaLinter, Prowler-IaC, gitleaks, Trivy) run as their own CI
+# steps and emit aggregated SARIF; the engine ingests the report rather than
+# shelling out to a (often Docker-only) tool in-process. Each runner skips with
+# a ScannerError when its report path is unset, so the source is inert until a
+# report is supplied — `collect()` swallows that and continues.
+# ---------------------------------------------------------------------------
+
+
+def _ingest_sarif_report(
+    report_path: str,
+    working_dir: Path,
+    *,
+    source: str,
+    category: AgentName,
+) -> list[Finding]:
+    """Parse a SARIF report file into findings, tolerant of a missing/invalid file."""
+
+    p = Path(report_path)
+    if not p.is_file():
+        raise ScannerError(f"{source}: SARIF report not found at {report_path!r}")
+    try:
+        data: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ScannerError(f"{source}: invalid SARIF JSON: {exc}") from exc
+    return parse_sarif(data, working_dir, category=category)
+
+
+@tool
+def run_prowler_iac(working_dir: str) -> list[Finding]:
+    """Ingest a Prowler-IaC SARIF report (``PROWLER_SARIF_PATH``) as security findings."""
+
+    if not settings.prowler_sarif_path:
+        raise ScannerError("prowler: PROWLER_SARIF_PATH not set")
+    return _ingest_sarif_report(
+        settings.prowler_sarif_path, Path(working_dir), source="prowler", category="security"
+    )
+
+
+@tool
+def run_gitleaks(working_dir: str) -> list[Finding]:
+    """Ingest a gitleaks SARIF report (``GITLEAKS_SARIF_PATH``) as security findings."""
+
+    if not settings.gitleaks_sarif_path:
+        raise ScannerError("gitleaks: GITLEAKS_SARIF_PATH not set")
+    return _ingest_sarif_report(
+        settings.gitleaks_sarif_path, Path(working_dir), source="gitleaks", category="security"
+    )
+
+
+@tool
+def run_trivy(working_dir: str) -> list[Finding]:
+    """Ingest a Trivy SARIF report (``TRIVY_SARIF_PATH``) as security findings."""
+
+    if not settings.trivy_sarif_path:
+        raise ScannerError("trivy: TRIVY_SARIF_PATH not set")
+    return _ingest_sarif_report(
+        settings.trivy_sarif_path, Path(working_dir), source="trivy", category="security"
+    )
+
+
+@tool
+def run_megalinter(working_dir: str) -> list[Finding]:
+    """Ingest a MegaLinter SARIF report (``MEGALINTER_SARIF_PATH``) as style findings.
+
+    MegaLinter's aggregated SARIF carries one run per sub-linter, so each
+    finding's source is preserved as the real linter (e.g. ``checkov:…``,
+    ``yamllint:…``) rather than a flat ``megalinter`` label.
+    """
+
+    if not settings.megalinter_sarif_path:
+        raise ScannerError("megalinter: MEGALINTER_SARIF_PATH not set")
+    return _ingest_sarif_report(
+        settings.megalinter_sarif_path, Path(working_dir), source="megalinter", category="style"
+    )
 
 
 # ---------------------------------------------------------------------------

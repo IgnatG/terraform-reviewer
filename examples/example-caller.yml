@@ -29,7 +29,7 @@ on:
 jobs:
   terraform-review:
     # Pin to a released tag (or the v1 major float) of THIS repo.
-    uses: spanosg131/terraform-review-agent/.github/workflows/terraform-review.yml@v1
+    uses: ignatg/terraform-review-agent/.github/workflows/terraform-review.yml@v1
     permissions:
       contents: read
       pull-requests: write
@@ -37,6 +37,12 @@ jobs:
       llm-provider: anthropic
       llm-model: claude-sonnet-4-5
       fail-on-severity: high # fail the check on any high/critical finding
+      # Wedge lenses (deterministic, no AI needed). "default" uses the built-in
+      # golden standards; point at a committed JSON to enforce your own house
+      # standard (e.g. terraform-standard: .assessor/terraform-house.json).
+      # See examples/README.md. Omit (or leave "") to keep a lens off.
+      terraform-standard: default # A1: golden module structure + terraform{} blocks
+      cicd-standard: default # A2: .github/workflows posture (SHA pins, permissions)
       # pull_request runs read the event; manual runs use the dispatch input.
       pr-number: ${{ github.event.pull_request.number || inputs.pr-number }}
     secrets:

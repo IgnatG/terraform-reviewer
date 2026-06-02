@@ -28,9 +28,9 @@ def test_graph_runs_with_terraform_changes() -> None:
     final = agent.invoke(ReviewState(pr=pr))
 
     assert final["skipped"] is False
-    assert final["security"] == []
-    assert final["cost"] == []
-    assert final["style"] == []
+    # Lenses run but (no scanner binaries / no infracost key on the host) report
+    # nothing — they merge into the single reducer-backed findings list.
+    assert final["findings"] == []
     # With no findings the aggregator still renders a clean "all clear" comment.
     assert final["comment_markdown"] == (
         "## Terraform Review Agent\n\nNo issues found in the changed Terraform files.\n"
@@ -49,4 +49,6 @@ def test_graph_skips_when_no_terraform_files_changed() -> None:
 def test_graph_topology_contains_expected_nodes() -> None:
     nodes = set(agent.get_graph().nodes)
 
-    assert {"start", "security", "cost", "style", "aggregator", "post_comment"} <= nodes
+    # Registry-driven: a single generic `lens` node is fanned out (one task per
+    # enabled lens) instead of fixed security/cost/style nodes.
+    assert {"start", "lens", "aggregator", "post_comment"} <= nodes

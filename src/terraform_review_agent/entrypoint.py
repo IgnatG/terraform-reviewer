@@ -23,7 +23,11 @@ import structlog
 
 from terraform_review_agent.agent import agent
 from terraform_review_agent.config import FailOnSeverity, Settings, settings
+from terraform_review_agent.dashboard_client import DashboardClient
 from terraform_review_agent.github_client import GitHubClient
+from terraform_review_agent.utils.evidence_pack import render_evidence_csv, render_evidence_html
+from terraform_review_agent.utils.findings_report import FindingsReport
+from terraform_review_agent.utils.sarif_export import render_sarif_json
 from terraform_review_agent.utils.state import SEVERITY_ORDER, Finding, PRContext, ReviewState
 
 log = structlog.get_logger(__name__)
@@ -127,6 +131,49 @@ def _clone_pr_workspace(pr: PRContext) -> str:
     return dest
 
 
+def _write_text(path_str: str, content: str, label: str) -> None:
+    out = Path(path_str)
+    if out.parent != Path():
+        out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(content, encoding="utf-8")
+    log.info("wrote output", label=label, path=str(out))
+
+
+def _write_outputs(final: ReviewState) -> None:
+    """Write every output surface from the aggregator's report (the I/O boundary).
+
+    findings.json (the contract) + the SARIF export (code-scanning) + the
+    HTML/CSV evidence pack. No-op if the graph produced no report (it always
+    should, but stay defensive — a skipped run still emits one).
+    """
+
+    if not final.findings_report_json:
+        log.info("no findings report produced; skipping write")
+        return
+    _write_text(settings.findings_output_path, final.findings_report_json, "findings.json")
+    report = FindingsReport.model_validate_json(final.findings_report_json)
+    _write_text(settings.sarif_output_path, render_sarif_json(report), "sarif")
+    _write_text(settings.evidence_html_path, render_evidence_html(report), "evidence.html")
+    _write_text(settings.evidence_csv_path, render_evidence_csv(report), "evidence.csv")
+
+
+def _post_to_dashboard(final: ReviewState) -> None:
+    """Best-effort push of the findings report to the hosted dashboard ingest.
+
+    No-op when no dashboard is configured (``DASHBOARD_INGEST_URL`` unset) or no
+    report was produced. Posted on every scan — including skipped ones — so the
+    dashboard records "this repo was scanned, 0 findings" too. Never raises: the
+    client swallows failures so dashboard downtime can't fail the run.
+    """
+
+    if not final.findings_report_json:
+        return
+    client = DashboardClient.from_settings()
+    if client is None:
+        return
+    client.post_report(FindingsReport.model_validate_json(final.findings_report_json))
+
+
 def _ensure_workspace(pr: PRContext, base_dir: str) -> str:
     """Return a workspace containing the PR's files.
 
@@ -170,6 +217,13 @@ def run(
         )
     )
     final = ReviewState.model_validate(raw_final)
+
+    # Always persist the output surfaces (findings.json + SARIF + evidence pack),
+    # even on a skipped run — downstream consumers (dashboard, code-scanning,
+    # Remediator) expect them per scan. This is the I/O boundary; the aggregator
+    # only serialized the report.
+    _write_outputs(final)
+    _post_to_dashboard(final)
 
     if final.skipped:
         log.info("skipping review", reason=final.skip_reason)

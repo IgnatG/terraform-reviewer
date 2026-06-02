@@ -1,17 +1,45 @@
 """Pydantic state schemas for the review graph.
 
-Specialist branches (security / cost / style) write to disjoint fields, so the
-graph needs no custom reducers — each agent owns its own list.
+Lenses fan out in parallel (one task per enabled lens) and each appends to the
+shared ``findings`` list via an ``operator.add`` reducer — the merge order is
+irrelevant because the renderer and the findings-report builder both re-sort
+deterministically.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+import operator
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 Severity = Literal["critical", "high", "medium", "low", "info"]
-AgentName = Literal["security", "cost", "style"]
+# The lens that produced a finding (also the lens id + comment grouping):
+#   security/cost/style — the ported original specialists (Phase 2)
+#   standards           — absence/gap detection against rule packs (Phase 4)
+#   terraform-standard  — A1 Terraform Standardiser (golden module structure)
+#   cicd                — A2 CI/CD Standardiser (.github/workflows posture)
+#   coverage            — A3 Test Coverage & Gap Analyser
+#   tech-debt           — A4 Tech-Debt Scorecard
+#   gds                 — A5 GDS Readiness Scanner
+AgentName = Literal[
+    "security",
+    "cost",
+    "style",
+    "standards",
+    "terraform-standard",
+    "cicd",
+    "coverage",
+    "tech-debt",
+    "gds",
+]
+# The Assessor lens code (A1-A5) a finding belongs to, stamped by the A-coded
+# lenses; the ported originals leave it unset. Surfaced as `lens` in findings.json.
+LensCode = Literal["A1", "A2", "A3", "A4", "A5"]
+# Three-state classification (✅ verified / ◐ evidence / ○ human_only). A finding
+# may assert it intrinsically (gap + A5 GDS points); otherwise the standard-
+# mapping layer derives it. Mirrors ControlState in utils.standards.pack.
+ThreeState = Literal["verified", "evidence", "human_only"]
 
 TERRAFORM_SUFFIXES = (".tf", ".tfvars", ".tf.json", ".tfvars.json")
 
@@ -83,17 +111,39 @@ class PRContext(BaseModel):
                 paths.add(f.previous_path)
         return paths
 
+    @property
+    def changed_paths(self) -> set[str]:
+        """Repo-relative paths of *all* changed files (incl. pre-rename names).
+
+        Used to scope check sources that aren't Terraform-specific (secrets,
+        dependency vulns) down to the files this PR touched.
+        """
+
+        paths: set[str] = set()
+        for f in self.changed_files:
+            paths.add(f.path)
+            if f.previous_path:
+                paths.add(f.previous_path)
+        return paths
+
 
 class Finding(BaseModel):
     """A single normalized review finding produced by a specialist agent."""
 
     agent: AgentName
+    # The Assessor lens code (A1-A5) when an A-coded lens produced this finding;
+    # the original security/cost/style/standards producers leave it None.
+    lens: LensCode | None = None
     severity: Severity
     file: str
     line: int | None = None
     rule: str
     message: str
     suggestion: str | None = None
+    # Intrinsic three-state classification when the lens knows it directly (A5
+    # GDS points, gap checks); otherwise None and the standard-mapping layer
+    # derives the state in the findings report.
+    state: ThreeState | None = None
 
     def dedupe_key(self) -> tuple[str, str, int | None]:
         """Identity for cross-agent deduplication."""
@@ -165,9 +215,10 @@ class CostReport(BaseModel):
 class ReviewState(BaseModel):
     """Top-level graph state.
 
-    Specialist nodes populate ``security`` / ``cost`` / ``style`` independently.
-    The aggregator emits ``comment_markdown``; ``post_comment`` records the
-    resulting comment id (if any).
+    Each enabled lens runs as a parallel task and appends to ``findings`` through
+    the ``operator.add`` reducer; the cost lens additionally sets ``cost_summary``
+    (it's the only writer). The aggregator emits ``comment_markdown``;
+    ``post_comment`` records the resulting comment id (if any).
     """
 
     pr: PRContext
@@ -179,14 +230,16 @@ class ReviewState(BaseModel):
         default=None,
         description="infracost baseline JSON (base-ref breakdown); cost agent skips when unset.",
     )
-    security: list[Finding] = Field(default_factory=list)
-    cost: list[Finding] = Field(default_factory=list)
+    findings: Annotated[list[Finding], operator.add] = Field(default_factory=list)
     cost_summary: CostSummary | None = None
-    style: list[Finding] = Field(default_factory=list)
     comment_markdown: str | None = None
+    findings_report_json: str | None = Field(
+        default=None,
+        description="Serialized findings.json (versioned output contract); set by the aggregator.",
+    )
     posted_comment_id: int | None = None
     skipped: bool = False
     skip_reason: str | None = None
 
     def all_findings(self) -> list[Finding]:
-        return [*self.security, *self.cost, *self.style]
+        return list(self.findings)

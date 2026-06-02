@@ -38,14 +38,16 @@ terraform-review-agent/
 │   ├── config.py             # Pydantic Settings (env-driven)
 │   ├── entrypoint.py         # CLI invoked by the GitHub Action (I/O boundary)
 │   ├── github_client.py      # fetch PR + diff; sticky-comment upsert
+│   ├── dashboard_client.py   # opt-in best-effort POST of findings.json to the hosted ingest
 │   ├── llm.py                # provider factory (OpenAI/Anthropic/Google)
-│   ├── utils/lenses/         # pluggable review lenses + registry (security/cost/style/standards + A1/A2)
-│   ├── utils/sources/        # check-source normalizers: SARIF + coverage (lcov/cobertura/jacoco)
+│   ├── ai/                   # swappable reword-only AI backend (BYOK + Copilot)
+│   ├── utils/lenses/         # pluggable review lenses + registry (security/cost/style/standards + A1-A5)
+│   ├── utils/sources/        # check-source normalizers: SARIF + coverage (lcov/cobertura/jacoco) + jscpd
 │   ├── utils/standards/      # rule packs: finding→control mapping + gap detection (the moat)
-│   ├── utils/standardisers/  # wedge lenses A1 (terraform) + A2 (cicd): golden-standard diff + score
+│   ├── utils/standardisers/  # golden-standard lenses A1 (terraform) + A2 (cicd) + A5 (gds): diff + score
 │   ├── rule_packs/*.json     # versioned, cited rule packs (shipped with the engine)
-│   ├── standards_defs/*.json # golden A1/A2 definitions (house module + CI/CD baseline; shipped)
-│   └── utils/{state,nodes,tools,prompts,render,findings_report}.py
+│   ├── standards_defs/*.json # golden A1/A2/A5 definitions (house module + CI/CD baseline + GDS; shipped)
+│   └── utils/{state,nodes,tools,prompts,render,findings_report,sarif_export,evidence_pack}.py
 ├── schemas/findings.schema.json   # versioned findings-JSON output contract
 ├── docs/                     # architecture & extension-point notes
 ├── tests/{unit,integration}/
@@ -106,6 +108,14 @@ RULE_PACKS_DIR=                       # optional dir of extra/custom rule packs
 # Wedge lenses (A1/A2): empty=off · "default"=built-in golden def · a path=custom JSON
 TERRAFORM_STANDARD=                   # A1 Terraform Standardiser (golden module structure)
 CICD_STANDARD=                        # A2 CI/CD Standardiser (.github/workflows posture)
+GDS_STANDARD=                        # A5 GDS readiness (off | default | path)
+# A3/A4 repo-lens signals (each off when unset)
+COVERAGE_REPORT_PATH=                 # A3 (COVERAGE_MIN_PERCENT defaults to 80)
+JSCPD_REPORT_PATH=                    # A4 duplication · SONARQUBE_SARIF_PATH for Sonar issues
+# Phase 8 outputs (all written each run; CI uploads them)
+SARIF_OUTPUT_PATH=./findings.sarif    # also EVIDENCE_HTML_PATH / EVIDENCE_CSV_PATH
+# Phase 9 dashboard ingest (opt-in; empty=off). POST is best-effort, never fails the scan.
+DASHBOARD_INGEST_URL=                  # also DASHBOARD_API_KEY (Bearer) / DASHBOARD_TIMEOUT_SECONDS
 
 SQLITE_PATH=./data/state.sqlite
 
@@ -142,6 +152,9 @@ ENVIRONMENT=development               # development | staging | production
 - **Standards** (`utils/standards/` + `rule_packs/`): versioned, cited rule packs map a finding's `{source}:{rule}` to a standard **control** and a three-state class (✅ verified / ◐ evidence / ○ human_only), and declare **expected artefacts** whose absence is a `human_only` finding (gap detection, via `StandardsLens`). The mapper runs at report-build time (`build_findings_report(mapper=…)`); active packs are chosen by `ENABLED_RULE_PACKS` (empty = inert). Add a standard = a new pack JSON, no code.
 - **Check sources** (`utils/sources/`): normalize external-tool output into `Finding`s. `sarif.py` parses any SARIF (MegaLinter, Prowler-IaC, gitleaks, Trivy) preserving the producing tool + rule id as `{source}:{rule}`; `coverage.py` parses lcov/cobertura/jacoco. Tools run as separate CI steps and write reports; the engine ingests them via `*_SARIF_PATH` settings (the ingestion `@tool`s in `tools.py`), self-skipping when unset.
 - **Wedge lenses** (`utils/standardisers/` + `standards_defs/`): the A-coded lenses (A1 Terraform, A2 CI/CD). Deterministic, no LLM — they diff a repo against a *golden definition* (`TerraformStandard` / `CICDBaseline`, versioned + cited JSON) and emit deviation findings + a consistency/posture score, stamping `lens="A1"|"A2"` (the `LensCode` on `Finding`). A2 parses workflow YAML with **PyYAML** (handle the `on:` → `True` boolean-key quirk). Each is inert unless `TERRAFORM_STANDARD` / `CICD_STANDARD` names a def (empty=off · `"default"`=built-in · path=custom); thin `Lens` wrappers in `utils/lenses/` gate on terraform changes like the standards lens. Add a wedge standard = a new def JSON, no code.
+- **Repo lenses A3-A5** (`utils/lenses/{coverage,tech_debt,gds}.py`): deterministic, gated-off-by-default. **A3** ingests a coverage report (`COVERAGE_REPORT_PATH`) → under-covered changed files + score; **A4** ingests jscpd JSON (`JSCPD_REPORT_PATH`) + an optional Sonar SARIF (`SONARQUBE_SARIF_PATH`) → duplication/issue findings + a scorecard; **A5** (`GDS_STANDARD`) checks govuk-frontend + artefact presence and reports each GDS point ✅/◐/○, marking rendered/judgement points out-of-scope honestly (never faked, never scored). A finding may assert its three-state class directly via `Finding.state` (A5); else `findings_report` derives it.
+- **Output surfaces** (Phase 8): from the one `FindingsReport`, the aggregator/entrypoint emit findings.json (`findings_report.py`), a **SARIF** export (`sarif_export.py` → code-scanning), and an HTML+CSV **evidence pack** (`evidence_pack.py`). The comment gains a ✅/◐/○ "Standards readiness" section (`render._readiness_section`) only when there's a three-state story. Per-finding `confidence` is derived from state (verified 1.0 / evidence 0.5 / human_only none).
+- **Dashboard ingest** (Phase 9): `dashboard_client.DashboardClient` POSTs the `FindingsReport` to `DASHBOARD_INGEST_URL` (`entrypoint._post_to_dashboard`). **Opt-in** (`from_settings` → `None` when no URL) + **best-effort** (`post_report` swallows `httpx` errors → `False`, never raises) so a dashboard outage can't fail a scan — same rule as the AI backend. Rule-pack/standard-def curation is a content workstream: [`docs/rule-pack-curation.md`](docs/rule-pack-curation.md).
 - **Tools** (`utils/tools.py`): `@tool` from `langchain_core.tools` with Pydantic input schemas.
 - **Prompts** (`utils/prompts.py`): never inlined in node code.
 - **Config** (`config.py`): `pydantic_settings.BaseSettings` reading env — secrets never hardcoded.

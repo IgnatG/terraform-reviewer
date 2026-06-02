@@ -1,0 +1,12 @@
+{
+  "id": "ci-baseline",
+  "name": "CI/CD pipeline baseline",
+  "version": "1.0.0",
+  "source_url": "https://docs.github.com/actions/security-guides/security-hardening-for-github-actions",
+  "forbid_pull_request_target": true,
+  "require_pinned_action_shas": true,
+  "require_top_level_permissions": true,
+  "pull_request_target_severity": "high",
+  "unpinned_action_severity": "medium",
+  "missing_permissions_severity": "low"
+}

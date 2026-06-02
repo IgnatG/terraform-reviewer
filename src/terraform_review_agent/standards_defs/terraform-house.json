@@ -1,0 +1,11 @@
+{
+  "id": "terraform-house",
+  "name": "House Terraform module standard",
+  "version": "1.0.0",
+  "source_url": "https://developer.hashicorp.com/terraform/language/modules/develop/structure",
+  "required_files": ["main.tf", "variables.tf", "outputs.tf", "versions.tf"],
+  "require_required_version": true,
+  "require_required_providers": true,
+  "require_backend": false,
+  "deviation_severity": "low"
+}

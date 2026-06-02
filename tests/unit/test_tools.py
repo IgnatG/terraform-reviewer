@@ -24,6 +24,7 @@ from terraform_review_agent.utils.tools import (
     _parse_tflint,
     _parse_tfsec,
     _severity_for_cost_delta,
+    build_infracost_baseline,
     build_synced_usage_file,
     prepare_file_payloads,
     run_checkov,
@@ -851,3 +852,25 @@ def test_build_infracost_baseline_raises_when_base_unresolvable(
 
     with pytest.raises(ScannerError):
         tools.build_infracost_baseline("/ws", "acme/example")
+
+
+def test_build_infracost_baseline_raises_when_no_output_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: if breakdown exits 0 but writes no out-file, the read must
+    # surface as a ScannerError (so the cost lens skips) rather than a raw
+    # FileNotFoundError that crashes the whole review.
+    monkeypatch.setattr(tools, "_which_or_raise", lambda b: b)
+    monkeypatch.setattr(
+        tools,
+        "_run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="basesha123", stderr=""),
+    )
+    monkeypatch.setattr(
+        tools.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""),
+    )
+
+    with pytest.raises(ScannerError, match="no baseline output"):
+        build_infracost_baseline("/ws", "acme/example")

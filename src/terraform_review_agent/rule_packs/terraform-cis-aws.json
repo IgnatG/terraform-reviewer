@@ -1,0 +1,64 @@
+{
+  "id": "terraform-cis-aws",
+  "standard": "CIS Amazon Web Services Foundations Benchmark",
+  "standard_version": "3.0.0",
+  "rule_pack_version": "2026.06.0",
+  "source_url": "https://www.cisecurity.org/benchmark/amazon_web_services",
+  "controls": [
+    {
+      "id": "2.1.1",
+      "title": "Ensure S3 buckets enforce encryption at rest",
+      "source_url": "https://www.cisecurity.org/benchmark/amazon_web_services",
+      "state": "verified"
+    },
+    {
+      "id": "2.1.2",
+      "title": "Ensure S3 bucket access logging is enabled",
+      "source_url": "https://www.cisecurity.org/benchmark/amazon_web_services",
+      "state": "verified"
+    },
+    {
+      "id": "3.1",
+      "title": "Ensure data at rest and in transit is encrypted (general)",
+      "source_url": "https://www.cisecurity.org/benchmark/amazon_web_services",
+      "state": "verified"
+    },
+    {
+      "id": "DOC.1",
+      "title": "Repository documents its purpose and usage (README)",
+      "source_url": "https://docs.github.com/articles/about-readmes",
+      "state": "human_only"
+    },
+    {
+      "id": "LIC.1",
+      "title": "Repository declares an explicit licence",
+      "source_url": "https://choosealicense.com/",
+      "state": "human_only"
+    }
+  ],
+  "mappings": [
+    { "control_id": "2.1.1", "rule": "checkov:CKV_AWS_19" },
+    { "control_id": "2.1.1", "rule": "tfsec:aws-s3-enable-bucket-encryption" },
+    { "control_id": "2.1.2", "rule": "checkov:CKV_AWS_18" },
+    { "control_id": "2.1.1", "rule_prefix": "prowler:s3_encryption" },
+    { "control_id": "3.1", "rule_prefix": "trivy:AVD-AWS" }
+  ],
+  "expected_artifacts": [
+    {
+      "id": "readme",
+      "control_id": "DOC.1",
+      "any_of": ["README.md", "README.rst", "README.txt", "docs/README.md"],
+      "severity": "low",
+      "message": "Repository has no README.",
+      "suggestion": "Add a README describing the module's purpose, inputs, outputs, and example usage."
+    },
+    {
+      "id": "license",
+      "control_id": "LIC.1",
+      "any_of": ["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"],
+      "severity": "low",
+      "message": "Repository declares no licence.",
+      "suggestion": "Add a LICENSE file so consumers know the terms of use."
+    }
+  ]
+}

@@ -32,6 +32,9 @@ Three more are **opt-in** (off by default, deterministic, no AI needed):
 | 📋 **Standards** | `ENABLED_RULE_PACKS` | maps findings to standard controls (✅/◐/○) + flags missing README/LICENSE/… via versioned rule packs |
 | 🏗️ **Terraform Std** (A1) | `terraform-standard` | golden module structure: required files + `terraform{}` `required_version`/`required_providers` blocks, with a consistency score |
 | ⚙️ **CI/CD** (A2) | `cicd-standard` | `.github/workflows` posture: no `pull_request_target`, SHA-pinned actions, least-privilege `permissions`, with a posture score |
+| 🧪 **Coverage** (A3) | `coverage-report-path` | changed files below the line-coverage threshold + a repo coverage score |
+| 🧹 **Tech Debt** (A4) | `jscpd-report-path` / `sonarqube-sarif-path` | code duplication + Sonar issues on changed files + a tech-debt scorecard |
+| 🇬🇧 **GDS** (A5) | `gds-standard` | per-point GDS/TCoP readiness (✅/◐/○) — govuk-frontend, open licence, accessibility statement; rendered points honestly out of scope |
 
 Scanners own *detection and severity*; an LLM only rewords each finding into a
 concise, actionable sentence — so the set of findings is deterministic run to
@@ -184,8 +187,14 @@ GitHub PR event
 
 Alongside the comment, every run writes a versioned **`findings.json`** — the
 machine-readable output contract (schema:
-[`schemas/findings.schema.json`](schemas/findings.schema.json)) — and the
-reusable workflow uploads it as the `terraform-review-findings` artefact.
+[`schemas/findings.schema.json`](schemas/findings.schema.json)) — plus a
+**SARIF** export (uploaded to the repo's Security → Code scanning tab + inline
+PR annotations) and an **evidence pack** (`evidence-pack.html`, prints to PDF, +
+`findings.csv`) showing ✅/◐/○ readiness per standard. The reusable workflow
+uploads them all as the `terraform-review-findings` artefact. Set
+`DASHBOARD_INGEST_URL` (+ `DASHBOARD_API_KEY`) to also POST the `findings.json`
+to a hosted dashboard for per-standard readiness history — opt-in and
+best-effort (a dashboard outage never fails the scan).
 
 Scanner versions are pinned in the container image — bumping one is a
 rebuild-image PR in this repo, not an edit to your workflow file.

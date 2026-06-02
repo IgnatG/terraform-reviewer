@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/IgnatG/terraform-reviewer/schemas/findings.schema.json",
+  "title": "Delivery Assurance findings report",
+  "description": "Versioned output contract emitted by the Assessor. Consumed by the report renderer, the hosted dashboard, and the Remediator. Deterministic: findings are stably ordered with content-derived ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scan", "summary", "findings"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Semantic version of this contract.",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "pr_number", "commit_sha", "base_sha", "scan_time", "engine_version", "mode"],
+      "properties": {
+        "repository": { "type": "string", "description": "owner/repo slug" },
+        "pr_number": { "type": "integer" },
+        "commit_sha": { "type": "string", "description": "PR head SHA" },
+        "base_sha": { "type": "string" },
+        "scan_time": { "type": "string", "format": "date-time" },
+        "engine_version": { "type": "string" },
+        "mode": { "type": "string", "enum": ["diff", "full"] }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "by_severity"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "by_severity": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "cost_total_monthly": { "type": ["number", "null"] },
+        "cost_delta_monthly": { "type": ["number", "null"] }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "source", "rule_id", "state", "severity", "evidence", "location"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable content-derived id (sha1 of source|rule|file|line)."
+        },
+        "lens": {
+          "type": ["string", "null"],
+          "description": "Assessor lens (A1-A5). Null until the lens registry lands (Phase 2)."
+        },
+        "category": {
+          "type": "string",
+          "description": "Producing specialist: security | cost | style (pre-lens grouping)."
+        },
+        "standard": {
+          "type": ["string", "null"],
+          "description": "Mapped standard (e.g. gds, dspt, terraform-house). Null until the standard-mapping layer lands (Phase 4)."
+        },
+        "standard_version": { "type": ["string", "null"] },
+        "control_id": {
+          "type": ["string", "null"],
+          "description": "Control/point within the standard (e.g. a GDS point). Null until Phase 4."
+        },
+        "source": {
+          "type": "string",
+          "description": "Producing tool: tfsec | checkov | infracost | tflint | terraform-fmt | llm | ..."
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "Original namespaced rule, e.g. tfsec:AWS017."
+        },
+        "rule_pack_version": { "type": ["string", "null"] },
+        "state": {
+          "type": "string",
+          "enum": ["verified", "evidence", "human_only"],
+          "description": "verified (deterministic) / evidence (confirm manually) / human_only (out of scope)."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low", "info"]
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "evidence": {
+          "type": "string",
+          "description": "What was found (the scanner/finding message)."
+        },
+        "location": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file"],
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": ["integer", "null"] },
+            "url": { "type": ["string", "null"] }
+          }
+        },
+        "remediation_hint": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

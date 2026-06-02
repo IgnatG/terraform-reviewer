@@ -110,12 +110,15 @@ def build_specialist_input(
     """Render the human turn: id-tagged scanner findings (JSON) + file contents.
 
     Each finding is given its list index as ``id`` so the LLM's annotations can
-    be matched back deterministically. The ``agent`` field is dropped — the node
-    owns it and the LLM should not reason about it.
+    be matched back deterministically. The ``agent``/``lens``/``state`` fields are
+    dropped — the node owns them and the LLM should not reason about them.
     """
 
     findings_json = json.dumps(
-        [{"id": i, **f.model_dump(exclude={"agent"})} for i, f in enumerate(findings)],
+        [
+            {"id": i, **f.model_dump(exclude={"agent", "lens", "state"})}
+            for i, f in enumerate(findings)
+        ],
         indent=2,
     )
     parts: list[str] = [

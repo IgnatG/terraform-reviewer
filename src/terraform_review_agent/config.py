@@ -13,7 +13,10 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLMProvider = Literal["openai", "anthropic", "google"]
+LLMProvider = Literal["openai", "anthropic", "google", "azure"]
+# Which AI backend rewords findings: BYOK (your own provider key, the default)
+# or the bundled GitHub Copilot CLI. Both only reword — never change a verdict.
+AIBackendName = Literal["byok", "copilot"]
 Environment = Literal["development", "staging", "production"]
 # "none" disables CI gating; otherwise the run fails when a finding's severity
 # meets or exceeds this floor. Mirrors `Severity` in utils.state plus "none".
@@ -36,6 +39,17 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
+    # Azure OpenAI (BYOK provider "azure"). Endpoint + deployment are required to
+    # use it; the API version defaults to a current GA value.
+    azure_api_key: SecretStr | None = None
+    azure_openai_endpoint: str | None = None
+    azure_openai_api_version: str = "2024-10-21"
+    azure_openai_deployment: str | None = None
+
+    # Which AI backend rewords findings (Phase 6). "byok" uses the provider below;
+    # "copilot" shells out to the GitHub Copilot CLI. The deterministic finding
+    # set is identical either way — the backend only rewrites message/suggestion.
+    ai_backend: AIBackendName = "byok"
 
     default_llm_provider: LLMProvider = "anthropic"
     default_llm_model: str = "claude-sonnet-4-5"
@@ -52,6 +66,59 @@ class Settings(BaseSettings):
     # coverage, less run-to-run consistency).
     enable_llm_findings: bool = False
 
+    # GitHub Copilot backend (Phase 6; used when ai_backend == "copilot"). The CLI
+    # is invoked as a subprocess with COPILOT_GITHUB_TOKEN in its env. Both the
+    # command and a per-call timeout are configurable so the wiring can adapt to
+    # the installed CLI without code changes.
+    copilot_github_token: SecretStr | None = None
+    copilot_cli_command: str = "copilot"
+    copilot_timeout_seconds: int = 120
+
+    # Which lenses the registry runs, as a comma-separated list of ids (e.g.
+    # "security,style"). Empty (default) runs every registered lens that applies
+    # to the repo. Unknown ids are ignored. See `utils.lenses.registry`.
+    enabled_lenses: str = ""
+
+    # External check sources (Phase 3): each runs as its own CI step and writes a
+    # SARIF report; set the path to ingest it. Empty (default) skips the source,
+    # so the engine's behaviour is unchanged unless a report is supplied.
+    #   prowler/gitleaks/trivy -> security lens · megalinter -> style lens
+    prowler_sarif_path: str | None = None
+    gitleaks_sarif_path: str | None = None
+    trivy_sarif_path: str | None = None
+    megalinter_sarif_path: str | None = None
+    # Coverage report (lcov/cobertura/jacoco) for the A3 lens (Phase 7).
+    coverage_report_path: str | None = None
+    # A3 flags a changed file whose line coverage is below this percentage.
+    coverage_min_percent: float = 80.0
+
+    # A4 Tech-Debt Scorecard sources (Phase 7). Each runs as its own CI step and
+    # writes a report; set the path to ingest it. Empty = that signal is skipped.
+    jscpd_report_path: str | None = None  # jscpd duplication JSON
+    sonarqube_sarif_path: str | None = None  # SonarQube issues exported as SARIF
+
+    # A5 GDS Readiness Scanner (Phase 7). Like the wedge lenses: empty = off,
+    # "default" = the built-in points definition, a path = a custom one.
+    gds_standard: str = ""
+
+    # Standard-mapping layer (Phase 4). Which rule packs are active:
+    #   empty (default) -> none (mapping inert; findings carry no control_id)
+    #   "*"             -> every discovered pack
+    #   CSV of ids      -> just those (e.g. "terraform-cis-aws")
+    enabled_rule_packs: str = ""
+    # Optional directory of extra/custom rule-pack JSON (built-in packs ship with
+    # the engine and are always discoverable).
+    rule_packs_dir: str | None = None
+
+    # Wedge lenses (Phase 5). Each names the golden-standard definition to enforce:
+    #   empty (default) -> the lens is off (behaviour unchanged)
+    #   "default"       -> the built-in definition shipped with the engine
+    #   a path          -> a custom definition JSON (your house standard)
+    # A1 Terraform Standardiser: golden module structure (required files/blocks).
+    terraform_standard: str = ""
+    # A2 CI/CD Standardiser: golden .github/workflows posture baseline.
+    cicd_standard: str = ""
+
     sqlite_path: str = "./data/state.sqlite"
 
     github_token: SecretStr | None = None
@@ -65,6 +132,25 @@ class Settings(BaseSettings):
     fail_on_severity: FailOnSeverity = "none"
 
     workspace_dir: str = "."
+
+    # Where the aggregator's findings.json (the versioned output contract) is
+    # written each run. Uploaded as a CI artefact and POSTed to the dashboard.
+    findings_output_path: str = "./findings.json"
+    # Phase 8 output surfaces (all written from the same report; CI uploads them).
+    # SARIF lands in GitHub code-scanning; the evidence pack is the downloadable
+    # ✅/◐/○ artefact (HTML prints to PDF) + a CSV export.
+    sarif_output_path: str = "./findings.sarif"
+    evidence_html_path: str = "./evidence-pack.html"
+    evidence_csv_path: str = "./findings.csv"
+
+    # Hosted dashboard ingest (Phase 9). After each scan the findings.json is
+    # POSTed here for per-standard readiness history + cross-repo rollups.
+    #   empty (default) -> off; no POST, behaviour unchanged
+    #   a URL           -> POST the report there (Bearer-authed with the key below)
+    # The POST is best-effort: a failure is logged and never fails the scan.
+    dashboard_ingest_url: str | None = None
+    dashboard_api_key: SecretStr | None = None
+    dashboard_timeout_seconds: int = 30
 
     langsmith_api_key: SecretStr | None = None
     langsmith_tracing: bool = False
@@ -102,6 +188,8 @@ class Settings(BaseSettings):
             return self.anthropic_api_key
         if target == "google":
             return self.google_api_key
+        if target == "azure":
+            return self.azure_api_key
         raise ValueError(f"Unsupported LLM provider: {target!r}")
 
 

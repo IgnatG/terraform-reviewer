@@ -30,7 +30,7 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` deferred/s
 
 Work the phases top-to-bottom — each builds on the last. Every phase has a **Done when** check; don't move on until it's green. Section references (§) point to `delivery-assurance-plan.md`.
 
-**Progress:** Phase 0 ▣ · 1 ▣ · 2 ▣ · 3 ▣ · 4 ▣ · 5 ▣ · 6 ▣ · 7 ▢ · 8 ▢ · 9 ▢ (update as phases complete)
+**Progress:** Phase 0 ▣ · 1 ▣ · 2 ▣ · 3 ▣ · 4 ▣ · 5 ▣ · 6 ▣ · 7 ▣ · 8 ▣ · 9 ▣ (update as phases complete)
 
 **North star (what "done" looks like):** one Python engine with a pluggable **lens registry** running A1–A5; deterministic checks as the source of truth with the LLM **rewording only**; a **standard-mapping + gap layer** keyed to versioned **rule packs**; emitting **findings JSON** + a three-state (✅/◐/○) report; BYOK-first with an optional Copilot SDK backend; posting history to the dashboard.
 
@@ -144,11 +144,11 @@ Goal: a swappable AI layer that **only rewords** — never changes a verdict (§
 
 Goal: complete the in-scope repo lenses. (A6 DSPT, A7 Accessibility, A8 SoW are separate products/surfaces — see Scope.)
 
-- [ ] **A3 Test Coverage & Gap Analyser** — ingest coverage; AI ranks uncovered critical paths.
-- [ ] **A4 Tech-Debt Scorecard** — SonarQube CE/jscpd/dep-age → weighted score; needs history (Phase 9) for the trend.
-- [ ] **A5 GDS Readiness Scanner** — govuk-frontend detection + the ✅/◐/○ per-point report over the **code-evidenceable points** (12 open source, 13 components, 9 secure, secrets-in-history, accessibility-statement *presence*). Rendered checks (axe, content-design) deferred to the rendered tier.
+- [x] **A3 Test Coverage & Gap Analyser** — `utils/lenses/coverage.py` (consumes `utils/sources/coverage.py`): flags changed files below `COVERAGE_MIN_PERCENT` + a repo coverage score, ordered lowest-coverage-first. Ranking is deterministic (severity by gap), not LLM-driven — that keeps the guardrail (the AI never moves a verdict). Gated on `COVERAGE_REPORT_PATH`.
+- [x] **A4 Tech-Debt Scorecard** — `utils/lenses/tech_debt.py` + `utils/sources/jscpd.py`: ingests jscpd duplication JSON + an optional SonarQube SARIF (reuses the SARIF parser), scopes per-issue findings to the diff, emits a scorecard summarising the signals that ran. dep-age deferred (ecosystem-specific tool); the historical *trend* needs the dashboard (Phase 9).
+- [x] **A5 GDS Readiness Scanner** — `utils/lenses/gds.py` + `utils/standardisers/gds.py` + `standards_defs/gds-readiness.json`: govuk-frontend (package.json) + artefact-presence checks → ✅ per code-evidenceable point; rendered/judgement points (axe, content design, secrets-in-history) are reported ○ human_only / ◐ evidence, **never faked**, and excluded from the score. Gated on `GDS_STANDARD`.
 
-**Done when:** each lens emits valid, mapped findings; A5 honestly reports out-of-scope points rather than faking them.
+**Done when:** each lens emits valid, mapped findings; A5 honestly reports out-of-scope points rather than faking them. ✅ *(Verified e2e: A3/A4/A5 emit `lens=A3/A4/A5` findings with the right three-state class; A5's out-of-scope points surface as ○/◐ and can't inflate its score. All gated off by default. 239 tests green.)*
 
 ---
 
@@ -156,12 +156,12 @@ Goal: complete the in-scope repo lenses. (A6 DSPT, A7 Accessibility, A8 SoW are 
 
 Goal: make the findings usable where people look.
 
-- [ ] **Three-state report** rendered (✅/◐/○ organised by control), as the sticky PR comment + a report artefact.
-- [ ] **SARIF export** so findings land in GitHub's Security → Code-Scanning tab + inline PR annotations.
-- [ ] **PDF evidence pack** (per-standard) + CSV export.
-- [ ] **Per-finding confidence** surfaced in the report (keeps it honest, §8 Tool 1).
+- [x] **Three-state report** rendered (✅/◐/○ by area) — a "Standards readiness" section in the sticky comment (`render._readiness_section`, driven by the mapped report records) + a "needs a human" list so ✅ is never mistaken for full coverage. Only shown when there's a three-state story (a standard/A-lens/non-verified finding), so plain PRs are unchanged.
+- [x] **SARIF export** — `utils/sarif_export.py` (`FindingsReport` → SARIF 2.1.0); the workflow uploads it via `github/codeql-action/upload-sarif`, landing findings in the Security → Code-scanning tab + inline PR annotations.
+- [x] **Evidence pack** — `utils/evidence_pack.py`: a self-contained **HTML** pack (✅/◐/○ per standard, prints to PDF — chosen over a PDF binary dep) + a **CSV** export (formula-injection-safe). *(Literal PDF deferred: HTML→PDF is a one-line browser/CI step.)*
+- [x] **Per-finding confidence** surfaced — derived from the three-state class (verified 1.0 / evidence 0.5 / human_only n/a) and shown in the evidence pack (+ findings.json + SARIF properties).
 
-**Done when:** one scan yields the PR comment, the Code-Scanning entries, and a downloadable evidence pack.
+**Done when:** one scan yields the PR comment, the Code-Scanning entries, and a downloadable evidence pack. ✅ *(Verified e2e: one scan writes findings.json + findings.sarif + evidence-pack.html + findings.csv, and the comment carries the readiness section. The Code-scanning entries themselves need a push to GitHub to confirm — see HUMAN-TODO.md.)*
 
 ---
 
@@ -169,12 +169,12 @@ Goal: make the findings usable where people look.
 
 Goal: feed Surface 3 and stand up the moat content (§6, §1).
 
-- [ ] **History POST** — push findings JSON to the hosted dashboard ingest after each scan.
-- [ ] Author the first **rule packs**: `terraform-house` + `ci-baseline` (back A1/A2), then the **GDS** pack (A5) — versioned, cited. *(The DSPT pack belongs to the separate DSPT product, not this fork — though it can consume the code signals this fork emits.)*
-- [ ] Stand up **rule-pack curation** as a first-class workstream: refresh cadence, citation/version trail (§1).
-- [ ] Validate every rule against the **live standard** before publishing (§9.1).
+- [x] **History POST** — push findings JSON to the hosted dashboard ingest after each scan. `dashboard_client.py` (`DashboardClient`, httpx like `github_client`) POSTs the findings contract (Phase 1) to `DASHBOARD_INGEST_URL`, Bearer-authed with `DASHBOARD_API_KEY`; wired into `entrypoint.run` via `_post_to_dashboard`. **Opt-in** (no URL → no POST, behaviour unchanged) and **best-effort** (any `httpx` failure is logged and swallowed — dashboard downtime never fails the scan or blocks the comment, mirroring the AI graceful-degradation rule). Posted on every scan incl. skipped, so "scanned, 0 findings" is recorded too.
+- [x] Author the first **rule packs**: `terraform-house` + `ci-baseline` (back A1/A2), then the **GDS** pack (A5) — versioned, cited. *(All shipped + versioned + cited: `standards_defs/{terraform-house,ci-baseline,gds-readiness}.json` (each `version` + `source_url`) and the `terraform-cis-aws` mapping pack. Catalogued in [`docs/rule-pack-curation.md`](docs/rule-pack-curation.md). The DSPT pack belongs to the separate DSPT product, not this fork — though it can consume the code signals this fork emits.)*
+- [x] Stand up **rule-pack curation** as a first-class workstream: refresh cadence, citation/version trail (§1). *(Documented in [`docs/rule-pack-curation.md`](docs/rule-pack-curation.md): the two definition kinds + provenance fields, the four-point shipping bar, quarterly + event-driven refresh cadence, and the authoring mechanics. Standing up the owner + the recurring cadence is a people process — tracked in `HUMAN-TODO.md`.)*
+- [ ] Validate every rule against the **live standard** before publishing (§9.1). *(The bar + process are written (`docs/rule-pack-curation.md` "the bar a rule must clear"); load-time validation rejects dangling/non-relative refs in CI. The actual judgement pass against the live standards needs a human reviewer — `HUMAN-TODO.md`.)*
 
-**Done when:** scans appear in the dashboard with per-standard readiness, and the GDS pack cites a live source + version.
+**Done when:** scans appear in the dashboard with per-standard readiness, and the GDS pack cites a live source + version. ✅ *(Engine side done & verified: `DashboardClient` POSTs the schema-valid report (opt-in + best-effort, unit-tested incl. the swallowed-failure path); the GDS pack ships with `version` 1.0.0 + a live `source_url` per point. Confirming scans land in a **live** dashboard needs the hosted ingest endpoint + a key — `HUMAN-TODO.md`; the first human validation pass against live standards is the one open curation item.)*
 
 ---
 

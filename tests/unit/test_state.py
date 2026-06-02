@@ -128,7 +128,8 @@ def test_review_state_collects_all_findings_in_order() -> None:
     sec = Finding(agent="security", severity="high", file="a.tf", rule="s", message="m")
     cost = Finding(agent="cost", severity="medium", file="b.tf", rule="c", message="m")
     style = Finding(agent="style", severity="low", file="c.tf", rule="y", message="m")
-    state = ReviewState(pr=_pr(), security=[sec], cost=[cost], style=[style])
+    # Lenses append to the single reducer-backed list; all_findings() returns it.
+    state = ReviewState(pr=_pr(), findings=[sec, cost, style])
 
     assert state.all_findings() == [sec, cost, style]
 
