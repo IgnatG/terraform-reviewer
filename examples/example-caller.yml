@@ -28,11 +28,14 @@ on:
 
 jobs:
   terraform-review:
-    # Pin to a released tag (or the v1 major float) of THIS repo.
-    uses: ignatg/terraform-review-agent/.github/workflows/terraform-review.yml@v1
+    # Pin to a released tag of the engine repo (create a `v1` tag, or pin the
+    # exact release e.g. @v1.0.0). This is a git ref, distinct from the Docker
+    # `:v1` float the reusable workflow pulls.
+    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1
     permissions:
       contents: read
       pull-requests: write
+      security-events: write # so the SARIF lands in the Security → Code scanning tab
     with:
       llm-provider: anthropic
       llm-model: claude-sonnet-4-5

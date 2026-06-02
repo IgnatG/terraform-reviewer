@@ -96,7 +96,7 @@ jobs:
       security-events: write # upload the SARIF to the code-scanning tab
 
     container:
-      image: ghcr.io/ignatg/terraform-review-agent:v1
+      image: ghcr.io/ignatg/terraform-reviewer:v1
       # The image ships a non-root `app` user, but GitHub-hosted container jobs
       # mount the workspace (and the $GITHUB_ENV/$GITHUB_OUTPUT command files) as
       # uid 1001, which a non-root container user cannot write. Run as root so

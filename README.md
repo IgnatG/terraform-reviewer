@@ -67,10 +67,11 @@ on:
 
 jobs:
   terraform-review:
-    uses: ignatg/terraform-review-agent/.github/workflows/terraform-review.yml@v1
+    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1
     permissions:
-      contents: read         # checkout
+      contents: read          # checkout
       pull-requests: write    # post/edit the sticky comment
+      security-events: write  # upload SARIF to the code-scanning tab
     with:
       llm-provider: anthropic
       llm-model: claude-sonnet-4-5
@@ -170,7 +171,7 @@ edited in place.
 ```
 GitHub PR event
   └─► reusable workflow (terraform-review.yml)
-        └─► container: ghcr.io/ignatg/terraform-review-agent:v1
+        └─► container: ghcr.io/ignatg/terraform-reviewer:v1
               └─► python -m terraform_review_agent.entrypoint
                     └─► LangGraph:
                           start ─► [lens ∥ lens ∥ …] ─► aggregator ─► post_comment

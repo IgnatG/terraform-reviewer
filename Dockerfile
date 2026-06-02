@@ -123,7 +123,9 @@ COPY pyproject.toml ./
 COPY src ./src
 COPY scripts ./scripts
 
-RUN mkdir -p /app/data && chown -R app:app /app
+# Set the exec bit explicitly: Git on Windows checkouts doesn't preserve the
+# Unix +x mode, so the COPY'd script can arrive as 0644 and fail with exit 126.
+RUN mkdir -p /app/data && chmod +x ./scripts/*.sh && chown -R app:app /app
 
 USER app
 

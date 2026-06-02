@@ -51,7 +51,7 @@ GitHub PR event
 
 ## Notes / gotchas observed
 
-- **Provenance:** authored by `ignatg`, distributed as `ghcr.io/ignatg/terraform-review-agent` — not the `infiniumtek` repo the plan named. Same architecture; treat ignatg as the upstream to credit.
+- **Provenance:** authored by `ignatg`, distributed as `ghcr.io/ignatg/terraform-reviewer` (the image name follows the repo, `IgnatG/terraform-reviewer`, via `build-image.yml`'s `${{ github.repository }}`) — not the `infiniumtek` repo the plan named. Same architecture; treat ignatg as the upstream to credit.
 - **Licence:** AGPL-3.0-or-later across `LICENSE`, `pyproject.toml`, and the `README.md` footer; the upstream MIT notice is preserved in `NOTICE` (resolved 2026-06-01, was previously inconsistent).
 - **Local tests:** 250/250 pass on Windows + Linux. (The earlier 2 Windows-only checkov leading-slash failures were fixed in `_relpath` — it now strips a POSIX leading slash on both platforms.)
 - **Engine is CLI-first already** (`python -m …entrypoint`); the Action just wraps it — good, keep it that way (no GitHub lock-in).

@@ -32,7 +32,7 @@ GitHub PR event
 | Cost agent | Infracost (paid third-party, approved) |
 | Comment mode | Single sticky comment, edited each run |
 | Checkpointer | Off for MVP (one-shot CI run) |
-| Distribution | Prebuilt container on GHCR — reusable workflow runs the job inside `ghcr.io/ignatg/terraform-review-agent`, no per-run installs |
+| Distribution | Prebuilt container on GHCR — reusable workflow runs the job inside `ghcr.io/ignatg/terraform-reviewer`, no per-run installs |
 
 ---
 
@@ -118,7 +118,7 @@ Parallel branches write to disjoint fields — no reducer needed.
 
 ### Phase 7 — Reusable workflow
 - [x] `.github/workflows/terraform-review.yml` (`workflow_call`, inputs/secrets above)
-- [x] Job uses `container: ghcr.io/ignatg/terraform-review-agent:v1` — no per-run scanner installs
+- [x] Job uses `container: ghcr.io/ignatg/terraform-reviewer:v1` — no per-run scanner installs
 - [x] `actions/checkout@v4` with `fetch-depth: 0` so the base ref is available for `infracost diff`
 - [x] Concurrency group + `cancel-in-progress`
 - [x] `examples/example-caller.yml` (docs-only sample — kept out of `.github/workflows/` so it doesn't run in this repo)
