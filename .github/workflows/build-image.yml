@@ -52,24 +52,13 @@ jobs:
             type=semver,pattern=v{{major}}
             type=sha,prefix=sha-,format=short
 
-      # Build once into the local daemon (amd64, the CI/runner target) so the
-      # smoke test runs against the exact artifact before anything is pushed.
-      - name: Build image (load for smoke test)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: terraform-review-agent:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Smoke test (binaries resolve on PATH)
-        run: docker run --rm --entrypoint /app/scripts/smoke_test.sh terraform-review-agent:ci
-
-      # Re-run as a push; all layers are served from the gha cache above.
-      - name: Push image
+      # Single build that pushes on success. The Dockerfile runs
+      # scripts/smoke_test.sh as its final layer, so a broken image (missing or
+      # wrong-arch binary, failed import) fails `docker build` and is never
+      # pushed — no separate load-then-smoke-test-then-rebuild pass is needed.
+      # The smoke output is visible in the build logs; layers are reused across
+      # runs via the GHA cache.
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
