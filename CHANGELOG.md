@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/IgnatG/terraform-reviewer/compare/v1.3.0...v1.3.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* **security:** :sparkles: enhance security lens and scanner integration ([5d91ffb](https://github.com/IgnatG/terraform-reviewer/commit/5d91ffb2646e1fc5c49de16b06c899e0fcf21560))
+
 ## [1.3.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.2.2...v1.3.0) (2026-06-03)
 
 
