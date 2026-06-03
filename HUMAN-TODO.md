@@ -33,15 +33,18 @@ remains here is verification / dogfooding / curation.
 
 ## AI backend (needs the Copilot CLI + a PAT) — _added when Phase 6 lands_
 
-- [ ] **Verify the GitHub Copilot backend against a live PAT.** The backend now
-  drives the official `github-copilot-sdk` over the standalone Copilot CLI the
-  image bundles (no Node runtime). Set `ai-backend: copilot` + the
-  `copilot-github-token` secret (a fine-grained PAT with the "Copilot Requests"
-  permission) and confirm a PR's findings get reworded. Two things only a live
-  run / CI image build can confirm: (a) the SDK's real session round-trips on a
-  PAT, and (b) the Dockerfile's `copilot-linux-*.tar.gz` extraction lands the
-  binary where `copilot --version` finds it (the build guards this, but it's
-  never been built here). BYOK stays the tested default. *(Phase 6 "Done when")*
+- [~] **GitHub Copilot backend — PARKED, blocked on an org/enterprise policy
+  (2026-06-03).** Verified live end-to-end through every layer: the SDK over the
+  image-bundled standalone CLI round-trips, delta/event handling works, and a
+  **user-owned fine-grained PAT with the "Copilot Requests" permission**
+  authenticates (classic `ghp_` and PATs without that permission are rejected).
+  The only remaining blocker is an **account entitlement**: the agentic Copilot
+  CLI returns *"You are not authorized to use this Copilot feature, it requires
+  an enterprise or organization policy to be enabled"* — an org/enterprise owner
+  must enable the CLI feature under **Org → Settings → Copilot → Policies**. No
+  code change unblocks it. The `terraform-aws-repo-examples` caller is reverted
+  to `ai-backend: byok` (which works) so its check is green; flip it back once
+  the policy is on. BYOK remains the tested default. *(Phase 6 "Done when")*
 
 ## Dashboard (needs the hosted ingest endpoint + a key) — _added when Phase 9 lands_
 

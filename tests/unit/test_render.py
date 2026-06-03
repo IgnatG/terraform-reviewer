@@ -259,12 +259,42 @@ def test_render_groups_repeated_rule_into_one_row_with_count() -> None:
         _pr(),
     )
 
-    assert "<summary>🟡 Medium (3)</summary>" in md  # true total in the summary
-    assert "**3 locations:**" in md  # one grouped row carrying the count
+    # Summary spells out findings vs rules so the single row doesn't read as
+    # "2 findings went missing".
+    assert "<summary>🟡 Medium (3 findings · 1 rule)</summary>" in md
+    # The repeat count rides the leftmost (severity) column as a ×N badge.
+    assert "🟡 🔒 **×3**" in md
     # All three locations are linked in the single row.
     assert "a.tf#L1" in md and "a.tf#L9" in md and "b.tf#L2" in md
     # Only one data row (header + separator + 1 row = the rule appears once).
     assert md.count("tflint:dep") == 1
+
+
+def test_render_grouped_summary_reconciles_findings_with_visible_rows() -> None:
+    # The reported confusion: a section header counts findings, but grouped rows
+    # count rules — so 5 medium findings across 2 rules show only 2 rows. The
+    # header must say "5 findings · 2 rules" so the gap is self-explaining.
+    findings = [
+        _f(severity="medium", rule="r1", file="a.tf", line=1, message="m"),
+        _f(severity="medium", rule="r1", file="a.tf", line=2, message="m"),
+        _f(severity="medium", rule="r1", file="a.tf", line=3, message="m"),
+        _f(severity="medium", rule="r2", file="b.tf", line=1, message="m"),
+        _f(severity="medium", rule="r2", file="b.tf", line=2, message="m"),
+    ]
+    md = render_comment(findings, _pr())
+    assert "<summary>🟡 Medium (5 findings · 2 rules)</summary>" in md
+    # Exactly two visible rule rows (each rule's name appears once).
+    assert md.count("`r1`") == 1 and md.count("`r2`") == 1
+
+
+def test_render_grouped_summary_stays_plain_when_rows_match_findings() -> None:
+    # One finding per rule → no collapse → keep the plain "(N)" count, no noise.
+    findings = [
+        _f(severity="medium", rule="r1", file="a.tf", line=1, message="m"),
+        _f(severity="medium", rule="r2", file="b.tf", line=1, message="m"),
+    ]
+    md = render_comment(findings, _pr())
+    assert "<summary>🟡 Medium (2)</summary>" in md
 
 
 def test_render_caps_locations_for_a_heavily_repeated_rule() -> None:
@@ -274,7 +304,7 @@ def test_render_caps_locations_for_a_heavily_repeated_rule() -> None:
     ]
     md = render_comment(findings, _pr())
 
-    assert "**12 locations:**" in md
+    assert "🔵 🔒 **×12**" in md  # repeat count in the severity column
     assert "… +4 more" in md  # 12 locations, capped at 8
 
 

@@ -41,7 +41,13 @@ _STATE_ORDER: tuple[str, ...] = ("verified", "evidence", "human_only")
 # Each severity renders as its own collapsible <details> section. The high-impact
 # ones start expanded (``open``); the long tail starts collapsed. Critical/high
 # list one row per finding; the rest group by rule to stay compact.
-_SECTION_SEVERITIES: tuple[Severity, ...] = ("critical", "high", "medium", "low", "info")
+_SECTION_SEVERITIES: tuple[Severity, ...] = (
+    "critical",
+    "high",
+    "medium",
+    "low",
+    "info",
+)
 _OPEN_SEVERITIES: tuple[Severity, ...] = ("critical", "high")
 _GROUPED_SEVERITIES: tuple[Severity, ...] = ("medium", "low", "info")
 # Cap locations listed per grouped rule so a rule firing on hundreds of lines
@@ -98,7 +104,9 @@ _AGENT_ORDER: tuple[AgentName, ...] = (
 
 # Str-keyed copy of the agent labels for the readiness lookup (a FindingRecord's
 # ``category`` is a plain str, not the AgentName literal that keys _AGENT_LABELS).
-_AREA_LABELS: dict[str, str] = {str(name): label for name, label in _AGENT_LABELS.items()}
+_AREA_LABELS: dict[str, str] = {
+    str(name): label for name, label in _AGENT_LABELS.items()
+}
 
 _NO_FINDINGS = "No issues found in the changed Terraform files."
 
@@ -254,13 +262,16 @@ def _summary_lines(findings: list[Finding]) -> list[str]:
 
 
 def _grouped_table(pr: PRContext, findings: list[Finding]) -> list[str]:
-    """Render findings grouped by rule: one row per rule with a count + locations.
+    """Render findings grouped by rule: one row per rule, with a ``×N`` repeat badge.
 
     A rule that fires across many lines/files (e.g. a tflint deprecation or a
     "tag every resource" rule) collapses to a single row carrying the worst
-    message + all its locations, instead of one near-identical row each. Locations
-    are capped at ``_MAX_LOCATIONS`` with a "+N more" tail; the count is the true
-    total. Preserves the (already severity-sorted) first-seen order of the rules.
+    message + all its locations, instead of one near-identical row each. When a
+    rule repeats, a ``xN`` badge sits next to the severity badge (the leftmost,
+    most-scanned column) so the repetition is obvious at a glance rather than
+    hidden at the end of a wide row. Locations are capped at ``_MAX_LOCATIONS``
+    with a "+N more" tail; ``xN`` is the true total. Preserves the (already
+    severity-sorted) first-seen order of the rules.
     """
 
     groups: dict[str, list[Finding]] = {}
@@ -276,6 +287,8 @@ def _grouped_table(pr: PRContext, findings: list[Finding]) -> list[str]:
         group = groups[rule]
         first = group[0]
         badge = f"{_SEVERITY_EMOJI[first.severity]} {_AGENT_EMOJI[first.agent]}"
+        if len(group) > 1:
+            badge += f" **x{len(group)}**"
         issue = f"**{_cell(first.message)}**"
         if first.suggestion:
             issue += f" <br> 💡 {_cell(first.suggestion)}"
@@ -284,13 +297,33 @@ def _grouped_table(pr: PRContext, findings: list[Finding]) -> list[str]:
         shown = links[:_MAX_LOCATIONS]
         extra = len(links) - len(shown)
         locations = ", ".join(shown) + (f" … +{extra} more" if extra else "")
-        if len(group) > 1:
-            locations = f"**{len(group)} locations:** {locations}"
         rows.append(f"| {badge} | {issue} | {locations} |")
     return rows
 
 
-def _severity_section(pr: PRContext, findings: list[Finding], sev: Severity) -> list[str]:
+def _section_count_label(group: list[Finding], sev: Severity) -> str:
+    """The ``<summary>`` count for a severity section.
+
+    Grouped severities (medium/low/info) collapse findings into one row per rule,
+    so a bare finding count reads as missing data next to fewer visible rows
+    (e.g. "Medium (35)" over 15 rows). When grouping actually collapses rows,
+    spell out both — "35 findings · 15 rules" — so the gap is self-explaining.
+    Critical/high render one row per finding, so they stay a plain count.
+    """
+
+    n = len(group)
+    if sev in _GROUPED_SEVERITIES:
+        n_rules = len({f.rule for f in group})
+        if n_rules != n:
+            findings_noun = "finding" if n == 1 else "findings"
+            rules_noun = "rule" if n_rules == 1 else "rules"
+            return f"{n} {findings_noun} · {n_rules} {rules_noun}"
+    return str(n)
+
+
+def _severity_section(
+    pr: PRContext, findings: list[Finding], sev: Severity
+) -> list[str]:
     """One collapsible <details> section for a single severity (empty if none).
 
     Critical/high open by default and list each finding; medium/low/info start
@@ -301,11 +334,16 @@ def _severity_section(pr: PRContext, findings: list[Finding], sev: Severity) -> 
     group = [f for f in findings if f.severity == sev]
     if not group:
         return []
-    rows = _grouped_table(pr, group) if sev in _GROUPED_SEVERITIES else _finding_table(pr, group)
+    rows = (
+        _grouped_table(pr, group)
+        if sev in _GROUPED_SEVERITIES
+        else _finding_table(pr, group)
+    )
     open_attr = " open" if sev in _OPEN_SEVERITIES else ""
+    label = f"{_SEVERITY_EMOJI[sev]} {_SEVERITY_LABELS[sev]} ({_section_count_label(group, sev)})"
     return [
         f"<details{open_attr}>",
-        f"<summary>{_SEVERITY_EMOJI[sev]} {_SEVERITY_LABELS[sev]} ({len(group)})</summary>",
+        f"<summary>{label}</summary>",
         "",
         *rows,
         "",
