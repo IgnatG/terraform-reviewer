@@ -17,7 +17,7 @@
 
 - **Python 3.13** · **uv** package manager · **`.venv` only** (never system Python)
 - **Pydantic v2** for all state, tool I/O, and config schemas
-- **LangGraph** or **LangChain** 
+- **LangGraph** or **LangChain**
 - **SQLite** checkpointer (`langgraph-checkpoint-sqlite`) if keeping state is required
 - **LLM providers: OpenAI, Anthropic, Google, Azure OpenAI** — selectable via config; plus an optional **GitHub Copilot** AI backend (reword-only)
 - **Docker** (compose) for reproducibility · `structlog` logging · `pytest` · `ruff` · `mypy --strict`
@@ -92,7 +92,7 @@ COPILOT_GITHUB_TOKEN=
 COPILOT_CLI_COMMAND=copilot
 
 DEFAULT_LLM_PROVIDER=anthropic        # openai | anthropic | google | azure
-DEFAULT_LLM_MODEL=claude-sonnet-4-5   # pin a dated snapshot for reproducibility
+DEFAULT_LLM_MODEL=claude-sonnet-4-6   # pin a dated snapshot for reproducibility
 DEFAULT_LLM_TEMPERATURE=0.0
 DEFAULT_LLM_SEED=7                    # best-effort determinism (OpenAI); `none` to disable
 ENABLE_LLM_FINDINGS=false            # true lets the LLM invent findings (less deterministic)
@@ -160,7 +160,7 @@ ENVIRONMENT=development               # development | staging | production
 - **Dashboard ingest** (Phase 9): `dashboard_client.DashboardClient` POSTs the same `FindingsReport` to `DASHBOARD_INGEST_URL` (`entrypoint._post_to_dashboard`). **Opt-in** (`from_settings` returns `None` when no URL) and **best-effort** (`post_report` swallows any `httpx` error → `False`, never raises) so dashboard downtime can't fail a scan — same graceful-degradation rule as the AI backend. Rule-pack/standard-def curation is a content workstream: [`docs/rule-pack-curation.md`](docs/rule-pack-curation.md).
 - **Scan scope** (Phase 10, `SCAN_MODE`): `full` (default) is a whole-repo posture scan; `diff` scopes the scanner lenses (security/style/tech-debt/coverage) to changed files via `_annotate.filter_to_changed` (a no-op in full mode) + the coverage lens's own match. Repo-level lenses (A1/A2/A5, gaps) are always whole-repo. The `mode` flows into the findings report.
 - **Inline review comments** (Phase 10, `INLINE_COMMENTS`, on by default): `entrypoint._post_inline_comments` posts one PR review comment per finding that sits on a changed line — `utils/diff.commentable_lines` parses the patch hunks; `github_client.post_review_comments` is **idempotent** (a hidden `tra-inline:<key>` marker dedupes re-runs) and **best-effort** (httpx errors swallowed). Findings off the diff stay in the sticky summary; the comment renders one collapsible `<details>` per severity (critical/high open, the rest collapsed + grouped by rule).
-- **Releases are automated** (release-please + Conventional Commits): merge the "release" PR → `vX.Y.Z` + `vX` git tags + `:vX.Y.Z`/`:vX`/`:latest` image (chained in `release-please.yml`). The image pin in `terraform-review.yml` is `extra-files`-managed; don't hand-tag. See `RELEASING.md`.
+- **Releases are automated** (release-please + Conventional Commits): merge the "release" PR → `vX.Y.Z` + `vX.Y` + `vX` git tags + matching `:vX.Y.Z`/`:vX.Y`/`:vX`/`:latest` image (chained in `release-please.yml`; `tag-floats` moves the major+minor floats). release-please updates pyproject/`__init__`/CHANGELOG only — **not** `.github/workflows/` (no `workflow` token scope; that throws "Error adding to tree"), so `terraform-review.yml` pins the `:v1` image float. Don't hand-tag. See `RELEASING.md`.
 - **Tools** (`utils/tools.py`): `@tool` from `langchain_core.tools` with Pydantic input schemas.
 - **Prompts** (`utils/prompts.py`): never inlined in node code.
 - **Config** (`config.py`): `pydantic_settings.BaseSettings` reading env — secrets never hardcoded.

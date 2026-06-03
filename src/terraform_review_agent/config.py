@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     ai_backend: AIBackendName = "byok"
 
     default_llm_provider: LLMProvider = "anthropic"
-    default_llm_model: str = "claude-sonnet-4-5"
+    default_llm_model: str = "claude-sonnet-4-6"
     default_llm_temperature: float = 0.0
     # Best-effort determinism for providers that honor it (OpenAI). Reasoning
     # models still vary somewhat; pair with a pinned model snapshot. Set to

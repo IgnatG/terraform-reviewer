@@ -5,6 +5,7 @@
       "release-type": "python",
       "package-name": "terraform-review-agent",
       "include-v-in-tag": true,
+      "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
@@ -17,12 +18,6 @@
         { "type": "ci", "section": "Continuous Integration" },
         { "type": "test", "section": "Tests" },
         { "type": "chore", "section": "Miscellaneous" }
-      ],
-      "extra-files": [
-        {
-          "type": "generic",
-          "path": ".github/workflows/terraform-review.yml"
-        }
       ]
     }
   }

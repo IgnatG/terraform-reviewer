@@ -108,7 +108,12 @@ jobs:
       security-events: write # upload the SARIF to the code-scanning tab
 
     container:
-      image: ghcr.io/ignatg/terraform-reviewer:v1.0.0 # x-release-please-version
+      # Major float: always the latest v1.x.y image (build-image keeps :v1 in
+      # sync). Pinned here rather than the exact version because release-please
+      # can't commit to .github/workflows/ (no `workflow` token scope), so it
+      # can't bump an exact pin. Consumers still pin reproducibly via the git ref
+      # (uses: ...@v1.2.3); the image tracks the major.
+      image: ghcr.io/ignatg/terraform-reviewer:v1
       # The image ships a non-root `app` user, but GitHub-hosted container jobs
       # mount the workspace (and the $GITHUB_ENV/$GITHUB_OUTPUT command files) as
       # uid 1001, which a non-root container user cannot write. Run as root so
@@ -152,7 +157,7 @@ jobs:
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
 
       - name: Checkout the PR merge ref (full history for infracost base diff)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # Review the PR by number, never the triggering ref — otherwise a
           # workflow_dispatch rerun would scan the selected branch (e.g. main)
@@ -177,7 +182,7 @@ jobs:
         # report is the contract downstream consumers (dashboard, Remediator) read,
         # and the evidence pack (HTML/CSV) is the downloadable ✅/◐/○ deliverable.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: terraform-review-findings
           path: |
@@ -192,6 +197,6 @@ jobs:
         # PR annotations. Best-effort: never fail the review if the upload can't run.
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: findings.sarif

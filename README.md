@@ -67,14 +67,14 @@ on:
 
 jobs:
   terraform-review:
-    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1  # or pin @v1.2.3
+    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1  # or @v1.2 / @v1.2.3
     permissions:
       contents: read          # checkout
       pull-requests: write    # post/edit the sticky comment
       security-events: write  # upload SARIF to the code-scanning tab
     with:
       llm-provider: anthropic
-      llm-model: claude-sonnet-4-5
+      llm-model: claude-sonnet-4-6
       fail-on-severity: high  # fail the check on any high/critical finding
     secrets:
       anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -96,7 +96,7 @@ additionally early-exits if no Terraform files actually changed.
 | Input | Default | Description |
 |:--|:--|:--|
 | `llm-provider` | `openai` | `openai` \| `anthropic` \| `google`. |
-| `llm-model` | `gpt-4o` | Model id — **must match the provider**. The default suits `openai`; set this when choosing another provider (e.g. `claude-sonnet-4-5`). |
+| `llm-model` | `gpt-4o` | Model id — **must match the provider**. The default suits `openai`; set this when choosing another provider (e.g. `claude-sonnet-4-6`). |
 | `fail-on-severity` | `none` | Gate CI when a finding meets/exceeds this floor: `critical` \| `high` \| `medium` \| `low` \| `info` \| `none`. The comment is always posted first; `none` never fails the check. |
 | `pr-number` | `""` | PR to review. Defaults to the triggering `pull_request` event; required for `workflow_dispatch` runs. |
 
@@ -233,7 +233,7 @@ as the reusable workflow does in CI.
    ```env
    GITHUB_TOKEN=ghp_...            # read access to the repo + write access to its PRs
    DEFAULT_LLM_PROVIDER=anthropic   # openai | anthropic | google
-   DEFAULT_LLM_MODEL=claude-sonnet-4-5
+   DEFAULT_LLM_MODEL=claude-sonnet-4-6
    ANTHROPIC_API_KEY=sk-ant-...     # the key matching DEFAULT_LLM_PROVIDER
    INFRACOST_API_KEY=ico-...        # optional — enables the cost agent
    ```

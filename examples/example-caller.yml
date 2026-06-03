@@ -28,8 +28,8 @@ on:
 
 jobs:
   terraform-review:
-    # @v1 tracks the latest v1.x.y release (auto-updates within the major); pin
-    # an exact tag (e.g. @v1.2.3) instead if you want fully reproducible runs.
+    # Pin at any level: @v1 (any 1.x.y) · @v1.2 (any 1.2.x) · @v1.2.3 (exact,
+    # fully reproducible). @v1 only jumps to @v2 on a breaking release.
     uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1
     permissions:
       contents: read
@@ -37,7 +37,7 @@ jobs:
       security-events: write # so the SARIF lands in the Security → Code scanning tab
     with:
       llm-provider: anthropic
-      llm-model: claude-sonnet-4-5
+      llm-model: claude-sonnet-4-6
       fail-on-severity: high # fail the check on any high/critical finding
       # scan-mode: full        # full=whole-repo posture (default) · diff=changed files only
       # inline-comments: true  # comment on findings that sit on changed lines (default on)
