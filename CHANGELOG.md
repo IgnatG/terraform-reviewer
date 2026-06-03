@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.1.0...v1.2.0) (2026-06-03)
+
+
+### Features
+
+* migrate to Python 3.14 ([549a67f](https://github.com/IgnatG/terraform-reviewer/commit/549a67f8286dd3b56eabd19c88854de63c946d83))
+
 ## [1.1.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.0.0...v1.1.0) (2026-06-03)
 
 
