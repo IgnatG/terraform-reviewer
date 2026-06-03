@@ -344,7 +344,7 @@ wheels = [
 
 [[package]]
 name = "checkov"
-version = "3.2.531"
+version = "3.2.532"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiodns" },
@@ -366,6 +366,7 @@ dependencies = [
     { name = "docker" },
     { name = "dockerfile-parse" },
     { name = "dpath" },
+    { name = "ecdsa" },
     { name = "gitpython" },
     { name = "importlib-metadata" },
     { name = "jmespath" },
@@ -391,9 +392,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "yarl" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0b/ad/7b0bcc01a4086f021fbad189fc255de6383570688cba8c5c3b4dfe4160af/checkov-3.2.531.tar.gz", hash = "sha256:869ce2a4ca2f8eb540f57e95209ca9536c4420d24aa9367dfe24c22ec4dd7328", size = 999769, upload-time = "2026-06-01T06:40:52.836Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/40/9a/afc02b42c77e6ee04d92e034f07edad4f55cf711866fac90baa5bcc0d522/checkov-3.2.532.tar.gz", hash = "sha256:e92e245447a00151950bc0050408ef1a4ea67e300bfb1f26693c77086e31852b", size = 1005782, upload-time = "2026-06-02T11:24:36.684Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/26/f233c6b73bb792a45705501b79184433ba43000f464ee67fc8728bc56fab/checkov-3.2.531-py3-none-any.whl", hash = "sha256:656b035d378f5ca26457c36cf3f9b8d0fe0cc60d3d2f8ad96676d5305946be84", size = 2307214, upload-time = "2026-06-01T06:40:48.084Z" },
+    { url = "https://files.pythonhosted.org/packages/74/85/e72a7eda1cf244b3f9827b0392247f11f2dcf4abb7963b14dee430a11231/checkov-3.2.532-py3-none-any.whl", hash = "sha256:2cb06fccb6db07f61f14aaec64fef47919de056dfeb6bbd0bd509de8231d6cca", size = 2319632, upload-time = "2026-06-02T11:24:33.36Z" },
 ]
 
 [[package]]
@@ -588,6 +589,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1f/2c/a4213cdbbc43b8fdf34b6e2afb415fd5d46e171d32a4bb92e7924548aa9f/dpath-2.1.3.tar.gz", hash = "sha256:d1a7a0e6427d0a4156c792c82caf1f0109603f68ace792e36ca4596fd2cb8d9d", size = 24016, upload-time = "2022-12-13T07:27:22.108Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c9/12/02fdb87afeab1987442164a2db470a995122c800f15265e9b7a5103a3fd9/dpath-2.1.3-py3-none-any.whl", hash = "sha256:d9560e03ccd83b3c6f29988b0162ce9b34fd28b9d8dbda46663b20c68d9cdae3", size = 17232, upload-time = "2022-12-13T07:27:20.023Z" },
+]
+
+[[package]]
+name = "ecdsa"
+version = "0.19.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/25/ca/8de7744cb3bc966c85430ca2d0fcaeea872507c6a4cf6e007f7fe269ed9d/ecdsa-0.19.2.tar.gz", hash = "sha256:62635b0ac1ca2e027f82122b5b81cb706edc38cd91c63dda28e4f3455a2bf930", size = 202432, upload-time = "2026-03-26T09:58:17.675Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/79/119091c98e2bf49e24ed9f3ae69f816d715d2904aefa6a2baa039a2ba0b0/ecdsa-0.19.2-py2.py3-none-any.whl", hash = "sha256:840f5dc5e375c68f36c1a7a5b9caad28f95daa65185c9253c0c08dd952bb7399", size = 150818, upload-time = "2026-03-26T09:58:15.808Z" },
 ]
 
 [[package]]
@@ -1987,7 +2000,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "checkov", marker = "extra == 'container'", specifier = "==3.2.531" },
+    { name = "checkov", marker = "extra == 'container'", specifier = "==3.2.532" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.26" },
     { name = "langchain-anthropic", specifier = ">=1.4" },
