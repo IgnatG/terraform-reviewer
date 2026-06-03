@@ -93,6 +93,8 @@ def annotate_with_llm(
     agent: AgentName,
     raw_findings: list[Finding],
     payloads: list[FilePayload],
+    *,
+    full_review: bool = False,
 ) -> list[Finding]:
     """Reword scanner findings with the LLM, keeping the finding set deterministic.
 
@@ -101,11 +103,14 @@ def annotate_with_llm(
     ``message``/``suggestion`` (matched back by the ``id`` we assign here), so
     the *set* of findings is identical run-to-run — only the wording varies.
     Speculative LLM-discovered findings are appended only when
-    ``settings.enable_llm_findings`` is set (and never for cost).
+    ``settings.enable_llm_findings`` is set (and never for cost). ``full_review``
+    (the PR-label whole-codebase trigger) forces discovery on for this run and
+    switches the prompts to whole-repo wording, since ``payloads`` then span the
+    whole repository rather than just the diff.
     """
 
     canonical = [f.model_copy(update={"agent": agent}) for f in raw_findings]
-    allow_discovery = settings.enable_llm_findings and agent != "cost"
+    allow_discovery = (settings.enable_llm_findings or full_review) and agent != "cost"
     # Nothing for the AI to do: no findings to reword and discovery is off (or
     # on but with no file content to discover from).
     if not canonical and (not allow_discovery or not payloads):
@@ -117,8 +122,8 @@ def annotate_with_llm(
     if not backend.available():
         return canonical
 
-    system = prompts.specialist_system_prompt(agent, allow_discovery)
-    human = prompts.build_specialist_input(canonical, payloads)
+    system = prompts.specialist_system_prompt(agent, allow_discovery, whole_repo=full_review)
+    human = prompts.build_specialist_input(canonical, payloads, whole_repo=full_review)
     try:
         review = backend.annotate(system, human)
     except Exception as exc:

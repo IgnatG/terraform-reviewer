@@ -96,7 +96,8 @@ additionally early-exits if no Terraform files actually changed.
 |:--|:--|:--|
 | `llm-provider` | `openai` | `openai` \| `anthropic` \| `google`. |
 | `llm-model` | `gpt-4o` | Model id — **must match the provider**. The default suits `openai`; set this when choosing another provider (e.g. `claude-sonnet-4-6`). |
-| `enable-llm-findings` | `false` | Let the LLM **propose** findings the scanners missed (◐ Evidence). Off keeps the finding set deterministic. *(Your LLM key already rewords every finding into a clear sentence on every run regardless — that's its main job; this is the separate "discover new findings" switch.)* |
+| `enable-llm-findings` | `false` | Let the LLM **propose** findings the scanners missed (◐ Evidence), scoped to the PR's **changed files**. Off keeps the finding set deterministic. *(Your LLM key already rewords every finding into a clear sentence on every run regardless — that's its main job; this is the separate "discover new findings" switch.)* For a **whole-codebase** LLM pass, set `llm-full-review` below. |
+| `llm-full-review` | `false` | **Whole-codebase LLM review**: when `true`, the LLM is fed **every** `.tf` file in the repo (not just the diff) and discovery is forced on — regardless of `enable-llm-findings`. Costs more tokens and is less reproducible, so it's opt-in. See [Whole-codebase LLM review](#whole-codebase-llm-review). |
 | `enabled-rule-packs` | `""` | Map findings to a named standard's controls + add ○ Human-only gap detection. `""` = off; `"*"` = all shipped packs; or a CSV of ids (e.g. `terraform-cis-aws`). |
 | `fail-on-severity` | `none` | Gate CI when a finding meets/exceeds this floor: `critical` \| `high` \| `medium` \| `low` \| `info` \| `none`. The comment is always posted first; `none` never fails the check. |
 | `scan-mode` | `full` | `full` reviews the **whole repo** (posture scan — surfaces pre-existing issues, not just the diff); `diff` scopes scanner findings to the files this PR changed. |
@@ -223,6 +224,35 @@ Set `inline-comments: false` for a single sticky comment with no inline
 annotations. Independently, `scan-mode` controls the *finding set*: `full`
 (default) reports whole-repo posture on every PR — so a small PR can surface
 pre-existing issues — while `diff` scopes scanner findings to the changed files.
+
+### Whole-codebase LLM review
+
+There are two different "whole-repo" controls, and they govern **different
+engines**:
+
+- **`scan-mode: full`** widens the **deterministic scanners** (tfsec, checkov,
+  tflint…) to report across the whole repo. These are the engines that cover
+  every file on every PR.
+- The **LLM** (both the always-on rewording and the `enable-llm-findings`
+  discovery) normally only sees the PR's **changed** `.tf` files — *not* the
+  whole repo, even in `scan-mode: full`. So LLM discovery can't surface an issue
+  in a file the PR didn't touch.
+
+To point the LLM at the **entire codebase**, set **`llm-full-review: true`** in
+your workflow. On every run then:
+
+- the LLM is fed **every** `.tf` file in the repo (capped to a total byte budget;
+  if a very large repo overflows, the dropped files are logged), and
+- **discovery is forced on** — you don't also need `enable-llm-findings: true`.
+
+It's off by default because a whole-repo LLM pass costs more tokens and is less
+reproducible than the scanners. Findings it surfaces in unchanged files land in
+the sticky comment (they can't be inline — they're off the diff).
+
+```yaml
+with:
+  llm-full-review: true
+```
 
 Scanner versions are pinned in the container image — bumping one is a
 rebuild-image PR in this repo, not an edit to your workflow file.

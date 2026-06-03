@@ -45,8 +45,13 @@ jobs:
       # sentence on every run — that's its main job, no toggle needed. This is the
       # *separate* switch for letting the LLM also PROPOSE findings the scanners
       # missed (◐ Evidence): default false to keep the finding set deterministic;
-      # true trades reproducibility for extra coverage.
+      # true trades reproducibility for extra coverage. This scopes the LLM to the
+      # PR's CHANGED files; for a whole-repo LLM pass, set llm-full-review below.
       enable-llm-findings: false
+      # Whole-codebase LLM review: when true the LLM reviews every .tf file in the
+      # repo (not just the diff), discovery forced on (supersedes
+      # enable-llm-findings). Costs more tokens; off by default.
+      llm-full-review: false # default: false
 
       # ── CI gating & scan scope ───────────────────────────────────────────────
       fail-on-severity: high # default: none · critical|high|medium|low|info|none

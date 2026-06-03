@@ -57,17 +57,26 @@ _DISCOVERY: dict[AgentName, str] = {
     "security": (
         "You may additionally report a real risk no scanner caught: add it to "
         "`discovered` with a rule id prefixed `security:llm-`, a severity from "
-        f"[{_SEVERITY_VOCAB}], and a file/line in the changed code. Do this only "
+        f"[{_SEVERITY_VOCAB}], and a file/line in the code below. Do this only "
         "when you are confident; otherwise leave `discovered` empty."
     ),
     "style": (
         "You may additionally report a clear style/maintainability issue the "
         "linters missed (naming, missing variable description/type, hardcoded "
         "values that belong in variables): add it to `discovered` with a rule id "
-        "prefixed `style:llm-` and a file/line in the changed code. Otherwise "
+        "prefixed `style:llm-` and a file/line in the code below. Otherwise "
         "leave `discovered` empty."
     ),
 }
+
+# Appended to the discovery clause for a whole-codebase review (the PR-label
+# trigger). The model sees every Terraform file, not just the diff, so it should
+# look across the whole repo — while keeping the same no-fabrication bar.
+_WHOLE_REPO_DISCOVERY = (
+    "You are reviewing the ENTIRE Terraform codebase below, not only the files "
+    "this PR changed. Report every genuine issue you find in any file — not just "
+    "in changed code — but still only when you are confident it is real."
+)
 
 _ANNOTATION_TASK = """\
 Each scanner finding below is listed with a stable integer `id`. For every \
@@ -83,19 +92,30 @@ set of findings is owned by the scanners, not you."""
 _NO_DISCOVERY = "Leave `discovered` empty: do not invent findings the scanners did not report."
 
 
-def specialist_system_prompt(agent: AgentName, allow_discovery: bool) -> str:
+def specialist_system_prompt(
+    agent: AgentName, allow_discovery: bool, *, whole_repo: bool = False
+) -> str:
     """Assemble the system prompt for ``agent``.
 
     ``allow_discovery`` toggles the speculative-findings clause (driven by
-    ``settings.enable_llm_findings`` at the call site). Cost never discovers, so
-    passing ``True`` for it still yields the no-discovery clause.
+    ``settings.enable_llm_findings`` or the whole-repo label at the call site).
+    Cost never discovers, so passing ``True`` for it still yields the
+    no-discovery clause. ``whole_repo`` switches the wording to a whole-codebase
+    review (the PR-label trigger), where the model is fed every Terraform file.
     """
 
+    files_phrase = (
+        "(2) the full contents of every Terraform file in the repository"
+        if whole_repo
+        else "(2) the contents of the changed Terraform files"
+    )
     discovery = _DISCOVERY.get(agent) if allow_discovery else None
+    if discovery and whole_repo:
+        discovery = f"{discovery}\n\n{_WHOLE_REPO_DISCOVERY}"
     return "\n\n".join(
         [
             f"{_PERSONA[agent]} You are given (1) findings from {_SCANNERS[agent]} "
-            "and (2) the contents of the changed Terraform files.",
+            f"and {files_phrase}.",
             _ANNOTATION_TASK,
             _MESSAGE_GUIDANCE[agent],
             discovery or _NO_DISCOVERY,
@@ -106,12 +126,16 @@ def specialist_system_prompt(agent: AgentName, allow_discovery: bool) -> str:
 def build_specialist_input(
     findings: list[Finding],
     payloads: list[FilePayload],
+    *,
+    whole_repo: bool = False,
 ) -> str:
     """Render the human turn: id-tagged scanner findings (JSON) + file contents.
 
     Each finding is given its list index as ``id`` so the LLM's annotations can
     be matched back deterministically. The ``agent``/``lens``/``state`` fields are
     dropped — the node owns them and the LLM should not reason about them.
+    ``whole_repo`` only changes the file-section header to signal the payloads
+    span the whole repository rather than just the diff.
     """
 
     findings_json = json.dumps(
@@ -121,13 +145,16 @@ def build_specialist_input(
         ],
         indent=2,
     )
+    files_header = (
+        "## Terraform files (whole repository)" if whole_repo else "## Changed Terraform files"
+    )
     parts: list[str] = [
         "## Scanner findings",
         "```json",
         findings_json,
         "```",
         "",
-        "## Changed Terraform files",
+        files_header,
     ]
     if not payloads:
         parts.append("_(no file contents available)_")

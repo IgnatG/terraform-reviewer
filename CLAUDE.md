@@ -95,7 +95,8 @@ DEFAULT_LLM_PROVIDER=anthropic        # openai | anthropic | google | azure
 DEFAULT_LLM_MODEL=claude-sonnet-4-6   # pin a dated snapshot for reproducibility
 DEFAULT_LLM_TEMPERATURE=0.0
 DEFAULT_LLM_SEED=7                    # best-effort determinism (OpenAI); `none` to disable
-ENABLE_LLM_FINDINGS=false            # true lets the LLM invent findings (less deterministic)
+ENABLE_LLM_FINDINGS=false            # true lets the LLM discover findings on changed files (less deterministic)
+LLM_FULL_REVIEW=false                # true = LLM reviews the whole codebase (every .tf), discovery forced on
 ENABLED_LENSES=                      # CSV of lens ids to run; empty = all (security,cost,style)
 # External SARIF check sources (empty = skip): prowler/gitleaks/trivy -> security, megalinter -> style
 PROWLER_SARIF_PATH=

@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # coverage, less run-to-run consistency).
     enable_llm_findings: bool = False
 
+    # Whole-codebase LLM review. When true, the security/style LLM is fed *every*
+    # Terraform file in the repo (not just the PR diff) and discovery is forced on
+    # — regardless of `enable_llm_findings`. Costs more tokens and is less
+    # reproducible than the diff-scoped default, so it's opt-in.
+    llm_full_review: bool = False
+
     # GitHub Copilot backend (Phase 6; used when ai_backend == "copilot"). The CLI
     # is invoked as a subprocess with COPILOT_GITHUB_TOKEN in its env. Both the
     # command and a per-call timeout are configurable so the wiring can adapt to

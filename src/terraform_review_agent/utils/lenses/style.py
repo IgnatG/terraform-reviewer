@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from terraform_review_agent.config import settings
 from terraform_review_agent.utils.lenses._annotate import (
     annotate_with_llm,
     collect,
@@ -36,9 +37,13 @@ class StyleLens(Lens):
         # terraform scanners only emit in .tf files (a subset), so this doesn't
         # widen their results.
         changed = state.pr.changed_paths
+        # Whole-codebase LLM review (llm-full-review): feed every .tf file and
+        # force discovery on, keeping findings in unchanged files (post-filter
+        # skipped below).
+        full_review = settings.llm_full_review
         # Scanners read the workspace from disk; run them even when payloads are
         # empty (large PR with omitted patches) so coverage isn't silently dropped.
-        payloads = prepare_file_payloads(state.pr, state.workspace)
+        payloads = prepare_file_payloads(state.pr, state.workspace, whole_repo=full_review)
         raw = filter_to_changed(
             collect(
                 [
@@ -52,5 +57,6 @@ class StyleLens(Lens):
         )
         if not (raw or payloads):
             return LensResult()
-        findings = annotate_with_llm("style", raw, payloads)
-        return LensResult(findings=filter_to_changed(findings, changed))
+        findings = annotate_with_llm("style", raw, payloads, full_review=full_review)
+        scoped = findings if full_review else filter_to_changed(findings, changed)
+        return LensResult(findings=scoped)

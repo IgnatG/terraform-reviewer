@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from terraform_review_agent.config import settings
 from terraform_review_agent.utils.sources.sarif import parse_sarif
 from terraform_review_agent.utils.state import (
+    TERRAFORM_SUFFIXES,
     AgentName,
     ChangedFile,
     CostReport,
@@ -697,16 +698,76 @@ def _truncate_to_bytes(text: str, cap_bytes: int) -> tuple[str, bool]:
     return cut + TRUNCATION_MARKER, True
 
 
+# Directories never worth feeding to the LLM in whole-repo mode: VCS metadata
+# and Terraform's provider/module download cache (huge, machine-generated).
+_WHOLE_REPO_SKIP_DIRS = frozenset({".git", ".terraform"})
+
+
+def _iter_repo_terraform_files(base: Path) -> list[Path]:
+    """Every Terraform file under ``base`` (sorted), skipping VCS/cache dirs."""
+
+    found: list[Path] = []
+    for path in base.rglob("*"):
+        if not path.is_file() or not path.name.endswith(TERRAFORM_SUFFIXES):
+            continue
+        rel_parts = path.relative_to(base).parts
+        if any(part in _WHOLE_REPO_SKIP_DIRS for part in rel_parts):
+            continue
+        found.append(path)
+    return sorted(found)
+
+
+def _whole_repo_payloads(
+    base: Path, per_file_cap_bytes: int, total_budget_bytes: int
+) -> list[FilePayload]:
+    """Payloads for *all* Terraform files in the repo, capped to a total budget.
+
+    Used for the on-demand whole-codebase LLM review (the PR-label trigger). Each
+    file is per-file-capped; once the running total would exceed
+    ``total_budget_bytes`` further files are dropped (but at least one is always
+    included). Dropped files are logged — never silently truncated — so an
+    operator can see a large repo didn't fit in one pass.
+    """
+
+    payloads: list[FilePayload] = []
+    total_bytes = 0
+    dropped = 0
+    for path in _iter_repo_terraform_files(base):
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        content, truncated = _truncate_to_bytes(raw, per_file_cap_bytes)
+        size = len(content.encode("utf-8"))
+        if payloads and total_bytes + size > total_budget_bytes:
+            dropped += 1
+            continue
+        rel = path.relative_to(base).as_posix()
+        mode: PayloadMode = "truncated" if truncated else "full"
+        payloads.append(FilePayload(path=rel, mode=mode, content=content))
+        total_bytes += size
+    if dropped:
+        log.info(
+            "whole_repo_payload_capped",
+            included=len(payloads),
+            dropped=dropped,
+            budget_bytes=total_budget_bytes,
+        )
+    return payloads
+
+
 def prepare_file_payloads(
     pr: PRContext,
     working_dir: Path | str,
     *,
+    whole_repo: bool = False,
     per_file_cap_bytes: int = PER_FILE_CONTENT_CAP_BYTES,
     total_threshold_bytes: int = TOTAL_CONTENT_THRESHOLD_BYTES,
 ) -> list[FilePayload]:
     """Return per-file LLM payloads with size caps + diff-only fallback applied.
 
-    For each terraform-relevant changed file we:
+    When ``whole_repo`` is set (the PR-label whole-codebase review), every
+    Terraform file under ``working_dir`` is loaded — not just the PR's changed
+    files — capped to ``total_threshold_bytes`` total, with dropped files logged.
+
+    Otherwise, for each terraform-relevant *changed* file we:
 
     * Read the file content from ``working_dir`` and cap it at
       ``per_file_cap_bytes`` (replacing the overflow with a truncation
@@ -720,6 +781,8 @@ def prepare_file_payloads(
     """
 
     base = Path(working_dir)
+    if whole_repo:
+        return _whole_repo_payloads(base, per_file_cap_bytes, total_threshold_bytes)
     candidates: list[ChangedFile] = [f for f in pr.changed_files if f.is_terraform]
 
     full_payloads: list[FilePayload] = []

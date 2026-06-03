@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from terraform_review_agent.config import settings
 from terraform_review_agent.utils.lenses._annotate import (
     annotate_with_llm,
     collect,
@@ -39,10 +40,14 @@ class SecurityLens(Lens):
         # all changed files, not just the .tf ones. (tfsec/checkov only emit in
         # .tf files, which are a subset, so this doesn't widen their results.)
         changed = state.pr.changed_paths
+        # The whole-codebase LLM review (llm-full-review) feeds every .tf file in
+        # the repo to the LLM and forces discovery on; findings it surfaces in
+        # unchanged files must survive the post-filter below.
+        full_review = settings.llm_full_review
         # Scanners read the workspace from disk, so they run whether or not we
         # could build LLM payloads — a large PR with omitted patches yields
         # empty payloads but must still be scanned.
-        payloads = prepare_file_payloads(state.pr, state.workspace)
+        payloads = prepare_file_payloads(state.pr, state.workspace, whole_repo=full_review)
         raw = filter_to_changed(
             collect(
                 [
@@ -58,5 +63,6 @@ class SecurityLens(Lens):
         )
         if not (raw or payloads):
             return LensResult()
-        findings = annotate_with_llm("security", raw, payloads)
-        return LensResult(findings=filter_to_changed(findings, changed))
+        findings = annotate_with_llm("security", raw, payloads, full_review=full_review)
+        scoped = findings if full_review else filter_to_changed(findings, changed)
+        return LensResult(findings=scoped)

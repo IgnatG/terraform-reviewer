@@ -38,7 +38,7 @@ from terraform_review_agent.utils.state import (
     ReviewState,
     SpecialistAnnotations,
 )
-from terraform_review_agent.utils.tools import ScannerError
+from terraform_review_agent.utils.tools import FilePayload, ScannerError
 
 # ---------------------------------------------------------------------------
 # fakes
@@ -890,3 +890,77 @@ def test_annotate_degrades_when_backend_raises(
     raw = [Finding(agent="security", severity="high", file="a.tf", rule="r", message="scanner")]
     findings = _annotate.annotate_with_llm("security", raw, [])
     assert [(f.rule, f.message, f.severity) for f in findings] == [("r", "scanner", "high")]
+
+
+# ---------------------------------------------------------------------------
+# whole-codebase LLM review (PR-label trigger)
+# ---------------------------------------------------------------------------
+
+
+def test_annotate_forces_discovery_for_full_review_without_enable_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # llm-full-review must surface discovered findings even with
+    # enable_llm_findings off — that's the whole point of the whole-codebase pass.
+    monkeypatch.setattr(settings, "enable_llm_findings", False)
+    backend = _patch_llm(
+        monkeypatch,
+        SpecialistAnnotations(
+            discovered=[
+                LLMFinding(severity="high", file="legacy/old.tf", rule="x", message="real risk")
+            ]
+        ),
+    )
+
+    findings = _annotate.annotate_with_llm(
+        "security",
+        [],
+        [FilePayload(path="legacy/old.tf", mode="full", content="resource {}")],
+        full_review=True,
+    )
+
+    assert [f.rule for f in findings] == ["security:llm-x"]
+    assert [f.file for f in findings] == ["legacy/old.tf"]
+    # The system prompt switches to whole-repo wording.
+    system = backend.calls[-1][0]
+    assert "every Terraform file in the repository" in system
+
+
+def test_security_lens_full_review_feeds_whole_repo_and_keeps_unchanged_findings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # diff mode + discovery off, but llm-full-review is on: the LLM is fed every
+    # .tf in the repo (incl. the unchanged legacy/old.tf) and its discovered
+    # finding in that unchanged file survives the (skipped) post-filter.
+    monkeypatch.setattr(settings, "scan_mode", "diff")
+    monkeypatch.setattr(settings, "enable_llm_findings", False)
+    monkeypatch.setattr(settings, "llm_full_review", True)
+    (tmp_path / "main.tf").write_text('resource "aws_s3_bucket" "b" {}\n')
+    (tmp_path / "legacy").mkdir()
+    (tmp_path / "legacy" / "old.tf").write_text('resource "aws_security_group" "open" {}\n')
+
+    state = _state(tmp_path, files=[ChangedFile(path="main.tf")])
+
+    monkeypatch.setattr(security_mod, "run_tfsec", _FakeTool([]))
+    monkeypatch.setattr(security_mod, "run_checkov", _FakeTool([]))
+    llm = _patch_llm(
+        monkeypatch,
+        SpecialistAnnotations(
+            discovered=[
+                LLMFinding(
+                    severity="high",
+                    file="legacy/old.tf",
+                    rule="security:llm-open-sg",
+                    message="0.0.0.0/0 ingress",
+                )
+            ]
+        ),
+    )
+
+    out = SecurityLens().run(state)
+
+    # The whole repo was fed — including the unchanged file's content.
+    assert "legacy/old.tf" in llm.human
+    assert "## Terraform files (whole repository)" in llm.human
+    # The discovered finding in the unchanged file is kept despite diff mode.
+    assert [(f.file, f.rule) for f in out.findings] == [("legacy/old.tf", "security:llm-open-sg")]

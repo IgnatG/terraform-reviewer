@@ -799,6 +799,49 @@ def test_prepare_file_payloads_includes_terraform_renamed_to_non_terraform(
     assert payloads[0].content.startswith('resource "aws_s3_bucket"')
 
 
+def test_prepare_file_payloads_whole_repo_includes_unchanged_files(tmp_path: Path) -> None:
+    # whole_repo=True feeds every .tf in the workspace, not just the PR's changed
+    # files — that's the whole-codebase LLM review (the PR-label trigger).
+    (tmp_path / "main.tf").write_text('resource "aws_s3_bucket" "b" {}\n')
+    (tmp_path / "modules").mkdir()
+    (tmp_path / "modules" / "vpc.tf").write_text('resource "aws_vpc" "v" {}\n')
+    (tmp_path / "README.md").write_text("not terraform")
+    # The PR only changed main.tf, but whole_repo must still surface vpc.tf.
+    pr = _pr([ChangedFile(path="main.tf")])
+
+    payloads = prepare_file_payloads(pr, tmp_path, whole_repo=True)
+
+    assert sorted(p.path for p in payloads) == ["main.tf", "modules/vpc.tf"]
+
+
+def test_prepare_file_payloads_whole_repo_skips_vcs_and_cache_dirs(tmp_path: Path) -> None:
+    # .git and .terraform are machine-generated noise — never fed to the LLM.
+    (tmp_path / "main.tf").write_text('resource "x" "y" {}\n')
+    (tmp_path / ".terraform" / "modules").mkdir(parents=True)
+    (tmp_path / ".terraform" / "modules" / "cached.tf").write_text("resource {}")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config.tf").write_text("resource {}")
+
+    payloads = prepare_file_payloads(_pr([]), tmp_path, whole_repo=True)
+
+    assert [p.path for p in payloads] == ["main.tf"]
+
+
+def test_prepare_file_payloads_whole_repo_caps_total_and_keeps_at_least_one(
+    tmp_path: Path,
+) -> None:
+    # Past the total budget, extra files are dropped (logged, not silent) but the
+    # ones that fit are returned — a huge repo still gets a partial pass.
+    for i in range(20):
+        (tmp_path / f"f{i}.tf").write_text("x" * 20_000)
+
+    payloads = prepare_file_payloads(
+        _pr([]), tmp_path, whole_repo=True, total_threshold_bytes=50_000
+    )
+
+    assert 0 < len(payloads) < 20
+
+
 # ---------------------------------------------------------------------------
 # build_infracost_baseline
 # ---------------------------------------------------------------------------
