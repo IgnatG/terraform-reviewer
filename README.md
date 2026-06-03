@@ -98,6 +98,8 @@ additionally early-exits if no Terraform files actually changed.
 | `llm-provider` | `openai` | `openai` \| `anthropic` \| `google`. |
 | `llm-model` | `gpt-4o` | Model id — **must match the provider**. The default suits `openai`; set this when choosing another provider (e.g. `claude-sonnet-4-6`). |
 | `fail-on-severity` | `none` | Gate CI when a finding meets/exceeds this floor: `critical` \| `high` \| `medium` \| `low` \| `info` \| `none`. The comment is always posted first; `none` never fails the check. |
+| `scan-mode` | `full` | `full` reviews the **whole repo** (posture scan — surfaces pre-existing issues, not just the diff); `diff` scopes scanner findings to the files this PR changed. |
+| `inline-comments` | `true` | Also post one **inline** review comment per finding that sits on a changed line (see [Comment surfaces](#comment-surfaces-sticky-vs-inline)). Set `false` for sticky-comment-only. |
 | `pr-number` | `""` | PR to review. Defaults to the triggering `pull_request` event; required for `workflow_dispatch` runs. |
 
 ## Secrets
@@ -197,11 +199,29 @@ uploads them all as the `terraform-review-findings` artefact. Set
 to a hosted dashboard for per-standard readiness history — opt-in and
 best-effort (a dashboard outage never fails the scan).
 
-By default the reviewer scans the **whole repo** (`scan-mode: full`; use `diff`
-to scope to changed files) and posts an **inline review comment** on each finding
-that sits on a changed line (`inline-comments: true`; re-runs are idempotent).
-Findings off the diff stay in the sticky comment, which groups repeated rules and
-collapses Medium so large result sets stay readable.
+### Comment surfaces: sticky vs inline
+
+Every run posts one **sticky comment** — the full report, grouped by rule and
+collapsed by severity (Critical/High open, the rest collapsed) so large result
+sets stay readable. It's upserted via a hidden marker, so re-runs edit the same
+comment rather than stacking new ones.
+
+With `inline-comments: true` (the default) the reviewer **also** posts inline
+review comments — but **only on lines the PR actually changed**. A finding is
+shown inline only when its `(file, line)` falls inside the PR's diff hunks
+(GitHub rejects comments off the diff); everything else stays in the sticky
+comment. Two things follow from that:
+
+- **Inline volume tracks the diff, not the repo.** Even in `scan-mode: full`, a
+  five-line PR can only get inline comments on those five lines (plus context) —
+  whole-repo posture findings that aren't on changed lines never appear inline,
+  so it can't spam the file. They remain in the sticky comment.
+- Inline comments are **idempotent** (marker-deduped), so re-runs don't repost.
+
+Set `inline-comments: false` for a single sticky comment with no inline
+annotations. Independently, `scan-mode` controls the *finding set*: `full`
+(default) reports whole-repo posture on every PR — so a small PR can surface
+pre-existing issues — while `diff` scopes scanner findings to the changed files.
 
 Scanner versions are pinned in the container image — bumping one is a
 rebuild-image PR in this repo, not an edit to your workflow file.
