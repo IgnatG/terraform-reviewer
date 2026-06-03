@@ -68,7 +68,7 @@ RUN chmod +x /out/* \
 # ---------------------------------------------------------------------------
 # Stage 2 — build the Python venv (build tools confined to this stage)
 # ---------------------------------------------------------------------------
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -99,7 +99,7 @@ RUN uv sync --frozen --no-dev --extra container
 # ---------------------------------------------------------------------------
 # Stage 3 — final runtime image
 # ---------------------------------------------------------------------------
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
