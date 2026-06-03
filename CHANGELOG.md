@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.2.2...v1.3.0) (2026-06-03)
+
+
+### Features
+
+* **config:** :sparkles: add fail-on-ai-error option to control CI behavior on AI call failures ([46c5fa8](https://github.com/IgnatG/terraform-reviewer/commit/46c5fa86dd2ef05bdf0a82741cbabee33c92fe6a))
+
 ## [1.2.2](https://github.com/IgnatG/terraform-reviewer/compare/v1.2.1...v1.2.2) (2026-06-03)
 
 
