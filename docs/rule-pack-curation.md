@@ -12,7 +12,7 @@ Both live inside the package so they ship in the wheel and are loadable by id.
 | Kind | Where | Backs | Schema owner |
 |------|-------|-------|--------------|
 | **Rule packs** | `src/terraform_review_agent/rule_packs/*.json` | the standard-mapping + gap layer (Phase 4) — map a scanner finding → a standard control, detect absent artefacts, assign ✅/◐/○ | `utils/standards/pack.py` (`RulePack`) |
-| **Golden definitions** | `src/terraform_review_agent/standards_defs/*.json` | the A1/A2/A5 lenses (Phase 5/7) — the house Terraform structure, the CI baseline, the GDS readiness points | `utils/standardisers/` models (`TerraformStandard`, `CICDBaseline`, `GDSDefinition`) |
+| **Golden definitions** | `src/terraform_review_agent/standards_defs/*.json` | the A1/A2 lenses (Phase 5) — the house Terraform structure, the CI baseline | `utils/standardisers/` models (`TerraformStandard`, `CICDBaseline`) |
 
 Both carry the same provenance fields so every finding traces back to a source:
 
@@ -25,7 +25,6 @@ Both carry the same provenance fields so every finding traces back to a source:
 |------------|-----|-------|--------|
 | Terraform house standard (A1) | `terraform-house` | [HashiCorp module structure](https://developer.hashicorp.com/terraform/language/modules/develop/structure) | shipped, v1.0.0 |
 | CI/CD baseline (A2) | `ci-baseline` | [GitHub Actions hardening](https://docs.github.com/actions/security-guides/security-hardening-for-github-actions) | shipped, v1.0.0 |
-| GDS readiness (A5) | `gds-readiness` | [Technology Code of Practice](https://www.gov.uk/guidance/the-technology-code-of-practice) | shipped, v1.0.0 |
 | CIS AWS mapping pack (Phase 4) | `terraform-cis-aws` | [CIS AWS Foundations 3.0.0](https://www.cisecurity.org/benchmark/amazon_web_services) | shipped, 2026.06.0 |
 
 > The **DSPT** pack belongs to the separate DSPT product, **not** this fork —
@@ -59,7 +58,7 @@ validation gate (§9.1) — it is a human judgement, not something the engine as
   version bump + a changelog line. Owner signs off that each rule still reflects
   the live text.
 - **Event-driven review** when an upstream standard publishes a new version
-  (CIS benchmark, TCoP, GitHub Actions guidance) — don't wait for the quarter.
+  (CIS benchmark, GitHub Actions guidance) — don't wait for the quarter.
 - **Citation/version trail.** Each pack edit is a reviewed PR; the
   `rule_pack_version` + git history *is* the audit trail. Keep the per-control
   `source_url` current so an auditor can click through from any finding.
@@ -76,6 +75,6 @@ validation gate (§9.1) — it is a human judgement, not something the engine as
 3. Drop it in `rule_packs/` (mapping packs) or `standards_defs/` (A-lens defs) —
    or, for org-private packs, point `RULE_PACKS_DIR` at a directory of extras.
 4. Enable it: `ENABLED_RULE_PACKS=<id>` (packs) or the lens input
-   (`terraform-standard` / `cicd-standard` / `gds-standard`).
+   (`terraform-standard` / `cicd-standard`).
 5. `make test` — the schema + load-time validation run in CI; a malformed pack
    fails the build before it can emit a misleading finding.

@@ -20,7 +20,6 @@ from pydantic import BaseModel, ValidationError
 
 from terraform_review_agent.config import settings
 from terraform_review_agent.utils.standardisers.cicd import CICDBaseline, check_workflows
-from terraform_review_agent.utils.standardisers.gds import GDSDefinition, evaluate_gds
 from terraform_review_agent.utils.standardisers.terraform import (
     TerraformStandard,
     check_modules,
@@ -71,21 +70,12 @@ def load_cicd_baseline() -> CICDBaseline | None:
     return load_definition(settings.cicd_standard, "ci-baseline.json", CICDBaseline)
 
 
-def load_gds_definition() -> GDSDefinition | None:
-    """The active A5 GDS readiness definition (``GDS_STANDARD``), or None."""
-
-    return load_definition(settings.gds_standard, "gds-readiness.json", GDSDefinition)
-
-
 __all__ = [
     "CICDBaseline",
-    "GDSDefinition",
     "TerraformStandard",
     "check_modules",
     "check_workflows",
-    "evaluate_gds",
     "load_cicd_baseline",
     "load_definition",
-    "load_gds_definition",
     "load_terraform_standard",
 ]

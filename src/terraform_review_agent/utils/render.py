@@ -74,7 +74,6 @@ _AGENT_LABELS: dict[AgentName, str] = {
     "cicd": "CI/CD",
     "coverage": "Coverage",
     "tech-debt": "Tech Debt",
-    "gds": "GDS",
 }
 _AGENT_EMOJI: dict[AgentName, str] = {
     "security": "🔒",
@@ -85,7 +84,6 @@ _AGENT_EMOJI: dict[AgentName, str] = {
     "cicd": "⚙️",
     "coverage": "🧪",
     "tech-debt": "🧹",
-    "gds": "🇬🇧",
 }
 _AGENT_ORDER: tuple[AgentName, ...] = (
     "security",
@@ -96,7 +94,6 @@ _AGENT_ORDER: tuple[AgentName, ...] = (
     "cicd",
     "coverage",
     "tech-debt",
-    "gds",
 )
 
 # Str-keyed copy of the agent labels for the readiness lookup (a FindingRecord's
@@ -350,8 +347,20 @@ def _readiness_section(records: list[FindingRecord]) -> list[str]:
     for r in records:
         tally.setdefault(_readiness_group(r), Counter())[r.state] += 1
 
+    # "Standards readiness" only when findings actually map to a named standard's
+    # controls (rule pack active). Otherwise this is just a per-area provenance
+    # tally, and calling it "readiness" reads like a compliance pass it isn't.
+    has_standard = any(r.standard for r in records)
+    header = "📊 Standards readiness" if has_standard else "📊 Detection confidence"
     parts = [
-        "### 📊 Standards readiness",
+        f"### {header}",
+        "",
+        # Stops two misreads: an all-✅ tally looking like a pass, and the area
+        # breakdown looking like a priority order (so Style gets ignored).
+        "_Each count is an **issue found** in that area. ✅/◐/○ shows **how** it was "
+        "detected (✅ deterministic scanner · ◐ AI-suggested · ○ needs a human) — "
+        "not a pass/fail, and not a priority. Priority is the severity ranking "
+        "above; a 🎨 Style finding can still be High._",
         "",
         "| Area | ✅ Verified | ◐ Evidence | ○ Human only |",
         "|:--|:--|:--|:--|",

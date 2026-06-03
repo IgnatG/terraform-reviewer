@@ -42,11 +42,10 @@ def _report():  # type: ignore[no-untyped-def]
             message="Bucket <unencrypted> & exposed",
         ),
         Finding(
-            agent="gds",
-            lens="A5",
+            agent="standards",
             severity="info",
             file=".",
-            rule="gds:wcag",
+            rule="gap:readme",
             message="needs review",
             state="human_only",
         ),

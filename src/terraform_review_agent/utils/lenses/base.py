@@ -2,7 +2,7 @@
 
 A lens replaces the old hard-coded specialist nodes (security / cost / style).
 The registry discovers lenses and the graph fans out one parallel task per
-*enabled* lens, so adding a new check (A1-A5 …) is a new `Lens` subclass plus a
+*enabled* lens, so adding a new check (A1-A4 …) is a new `Lens` subclass plus a
 registry entry — no graph surgery.
 
 Contract:

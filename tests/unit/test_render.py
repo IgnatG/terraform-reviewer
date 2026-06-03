@@ -73,11 +73,10 @@ def test_readiness_section_renders_when_states_present() -> None:
     findings = [
         _f(rule="tfsec:x", message="mapped verified"),
         Finding(
-            agent="gds",
-            lens="A5",
+            agent="standards",
             severity="info",
             file=".",
-            rule="gds:wcag",
+            rule="gap:readme",
             message="needs manual review",
             state="human_only",
         ),
@@ -101,6 +100,21 @@ def test_readiness_section_absent_for_plain_findings() -> None:
     report = build_findings_report(pr=_pr(), findings=findings, cost_summary=None)
     md = render_comment(findings, _pr(), None, records=report.findings)
     assert "Standards readiness" not in md
+
+
+def test_readiness_header_is_detection_confidence_without_a_standard() -> None:
+    # An LLM-discovered finding -> state "evidence", but no mapped standard. The
+    # section renders (there's a non-verified state to show), yet must NOT claim
+    # "Standards readiness" — there's no control coverage to assert, only how the
+    # finding was detected. The caption also reframes the tally away from priority.
+    from terraform_review_agent.utils.findings_report import build_findings_report
+
+    findings = [_f(rule="security:llm-x", message="ai-suspected risk")]
+    report = build_findings_report(pr=_pr(), findings=findings, cost_summary=None)
+    md = render_comment(findings, _pr(), None, records=report.findings)
+    assert "### 📊 Detection confidence" in md
+    assert "Standards readiness" not in md
+    assert "Priority is the severity ranking" in md  # caption present
 
 
 # ---------------------------------------------------------------------------

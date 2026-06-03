@@ -22,6 +22,14 @@ on:
         description: "Model id — must match the provider (default suits openai)."
         type: string
         default: gpt-4o
+      enable-llm-findings:
+        description: >-
+          Let the LLM propose findings the scanners didn't catch (shown as ◐
+          Evidence). Off by default keeps the finding set deterministic — the LLM
+          only rewords scanner findings. true = more coverage, less run-to-run
+          consistency.
+        type: boolean
+        default: false
       fail-on-severity:
         description: >-
           Gate CI when a finding meets/exceeds this floor:
@@ -52,10 +60,11 @@ on:
           repo-relative path to a custom definition JSON. Empty = off.
         type: string
         default: ""
-      gds-standard:
+      enabled-rule-packs:
         description: >-
-          A5 GDS Readiness Scanner: "default" for the built-in points, or a
-          repo-relative path to a custom definition JSON. Empty = off.
+          Map findings to a named standard's controls + add ○ Human-only gap
+          detection for missing expected artefacts. Empty = off; "*" = all
+          shipped packs; or a CSV of pack ids (e.g. "terraform-cis-aws").
         type: string
         default: ""
       coverage-report-path:
@@ -128,14 +137,16 @@ jobs:
       # Provider selection + secrets, read by config.Settings inside the image.
       DEFAULT_LLM_PROVIDER: ${{ inputs.llm-provider }}
       DEFAULT_LLM_MODEL: ${{ inputs.llm-model }}
+      ENABLE_LLM_FINDINGS: ${{ inputs.enable-llm-findings }}
       FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
       SCAN_MODE: ${{ inputs.scan-mode }}
       INLINE_COMMENTS: ${{ inputs.inline-comments }}
       # Wedge lenses (Phase 5) — off unless the caller names a definition.
       TERRAFORM_STANDARD: ${{ inputs.terraform-standard }}
       CICD_STANDARD: ${{ inputs.cicd-standard }}
+      # Standard-mapping + gap layer (Phase 4) — off unless packs are named.
+      ENABLED_RULE_PACKS: ${{ inputs.enabled-rule-packs }}
       # Repo lenses (Phase 7) — each off unless its definition/report is supplied.
-      GDS_STANDARD: ${{ inputs.gds-standard }}
       COVERAGE_REPORT_PATH: ${{ inputs.coverage-report-path }}
       JSCPD_REPORT_PATH: ${{ inputs.jscpd-report-path }}
       SONARQUBE_SARIF_PATH: ${{ inputs.sonarqube-sarif-path }}

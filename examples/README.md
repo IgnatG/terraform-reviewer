@@ -24,7 +24,6 @@ repo.
 | **A2 CI/CD Standardiser** | Every `.github/workflows/*.yml` avoids `pull_request_target`, pins third-party actions to a full commit SHA, and sets a least-privilege top-level `permissions:` block. Emits a deviation per issue + a posture score. | `cicd-standard:` input → `CICD_STANDARD` |
 | **A3 Coverage** | Changed source files below the line-coverage threshold + a repo coverage score (ingests a coverage report your CI already produces). | `coverage-report-path:` input → `COVERAGE_REPORT_PATH` |
 | **A4 Tech-Debt** | Code duplication (jscpd) + Sonar issues on changed files + a tech-debt scorecard. | `jscpd-report-path:` / `sonarqube-sarif-path:` inputs |
-| **A5 GDS Readiness** | Per-point GDS/TCoP readiness (✅/◐/○): govuk-frontend, open licence, accessibility statement; rendered/judgement points are reported honestly as out of scope, never faked. | `gds-standard:` input → `GDS_STANDARD` |
 
 > **Outputs.** Every run writes `findings.json`, a SARIF export (uploaded to the
 > Security → Code scanning tab), and an evidence pack (`evidence-pack.html`,
@@ -48,7 +47,6 @@ In your caller (see `example-caller.yml`):
 with:
   terraform-standard: default
   cicd-standard: default
-  gds-standard: default # A5 GDS readiness (built-in points)
   # A3/A4 need a report your CI produced first:
   # coverage-report-path: coverage/lcov.info
   # jscpd-report-path: report/jscpd.json

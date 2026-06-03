@@ -34,11 +34,10 @@ def _findings() -> list[Finding]:
         ),
         Finding(agent="style", severity="low", file="vars.tf", rule="tflint:x", message="nit"),
         Finding(
-            agent="gds",
-            lens="A5",
+            agent="standards",
             severity="info",
             file=".",
-            rule="gds:wcag",
+            rule="gap:readme",
             message="needs manual review",
             state="human_only",
         ),
@@ -53,15 +52,15 @@ def test_sarif_structure_and_severity_levels() -> None:
     driver = sarif["runs"][0]["tool"]["driver"]
     assert driver["name"] == "terraform-review-agent"
     # One rule per distinct rule id.
-    assert {r["id"] for r in driver["rules"]} == {"tfsec:AWS01", "tflint:x", "gds:wcag"}
+    assert {r["id"] for r in driver["rules"]} == {"tfsec:AWS01", "tflint:x", "gap:readme"}
 
     results = {r["ruleId"]: r for r in sarif["runs"][0]["results"]}
     assert results["tfsec:AWS01"]["level"] == "error"  # critical -> error
     assert results["tflint:x"]["level"] == "note"  # low -> note
-    assert results["gds:wcag"]["level"] == "none"  # info -> none
+    assert results["gap:readme"]["level"] == "none"  # info -> none
     # The content-hash id is the partial fingerprint for code-scanning dedupe.
     assert results["tfsec:AWS01"]["partialFingerprints"]["terraformReviewAgent/v1"]
-    assert results["gds:wcag"]["properties"]["state"] == "human_only"
+    assert results["gap:readme"]["properties"]["state"] == "human_only"
     assert results["tfsec:AWS01"]["locations"][0]["physicalLocation"]["region"]["startLine"] == 3
 
 

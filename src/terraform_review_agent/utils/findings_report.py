@@ -88,7 +88,7 @@ class FindingRecord(BaseModel):
     """One finding in the emitted contract (superset of the internal Finding)."""
 
     id: str
-    lens: str | None = None  # A1-A5 — set by the A-coded lenses (A1/A2 today)
+    lens: str | None = None  # A1-A4 — set by the A-coded lenses (A1/A2 today)
     category: str  # current producer: security | cost | style
     standard: str | None = None  # populated by the standard-mapping layer (Phase 4)
     standard_version: str | None = None
@@ -149,7 +149,7 @@ def _to_record(finding: Finding, mapper: StandardMapper | None = None) -> Findin
     is_llm = _is_llm_finding(finding)
     mapping = mapper.map_rule(finding.rule) if mapper is not None else None
     # State precedence: a lens that knows the classification asserts it directly
-    # (A5 GDS points); else a mapped control owns it; else fall back to the
+    # (gap checks); else a mapped control owns it; else fall back to the
     # producer default (deterministic scanner -> verified, speculative LLM ->
     # evidence).
     if finding.state is not None:

@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 7 repo lenses (A3 coverage, A4 tech-debt, A5 GDS)."""
+"""Unit tests for the Phase 7 repo lenses (A3 coverage, A4 tech-debt)."""
 
 from __future__ import annotations
 
@@ -8,11 +8,8 @@ import pytest
 
 from terraform_review_agent.config import settings
 from terraform_review_agent.utils.lenses.coverage import CoverageLens
-from terraform_review_agent.utils.lenses.gds import GDSLens
 from terraform_review_agent.utils.lenses.tech_debt import TechDebtLens
 from terraform_review_agent.utils.sources.jscpd import parse_jscpd
-from terraform_review_agent.utils.standardisers import load_gds_definition
-from terraform_review_agent.utils.standardisers.gds import GDSDefinition, GDSPoint, evaluate_gds
 from terraform_review_agent.utils.state import ChangedFile, PRContext, ReviewState
 
 
@@ -207,64 +204,3 @@ def test_a3_ambiguous_basename_is_not_misattributed(
     state = _state(tmp_path, ["main.tf", "a/util.py", "b/util.py"])
     findings = CoverageLens().run(state).findings
     assert _rule(findings, "coverage:under-covered") == []
-
-
-# ---------------------------------------------------------------------------
-# A5 — GDS readiness
-# ---------------------------------------------------------------------------
-
-
-def test_a5_reports_three_states_honestly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    (tmp_path / "package.json").write_text('{"dependencies": {"govuk-frontend": "^5.0.0"}}')
-    (tmp_path / "LICENSE").write_text("MIT")
-    (tmp_path / "README.md").write_text("# Service")
-    # No accessibility statement file -> that verified point is "not met".
-    monkeypatch.setattr(settings, "gds_standard", "default")
-    definition = load_gds_definition()
-    assert definition is not None
-
-    findings = evaluate_gds(tmp_path, definition)
-    by_rule = {f.rule: f for f in findings}
-
-    assert by_rule["gds:components-govuk-frontend"].state == "verified"
-    assert by_rule["gds:components-govuk-frontend"].severity == "info"  # met
-    assert by_rule["gds:opensource-licence"].severity == "info"  # met
-    assert by_rule["gds:accessibility-statement-present"].severity == "medium"  # not met
-    # The shipped def is code-evidenceable points only — no out-of-scope noise.
-    assert "gds:accessibility-wcag-rendered" not in by_rule
-    assert "gds:secure-secrets-in-history" not in by_rule
-    score = by_rule["gds:score"]
-    assert "3/4 code-evidenceable points met" in score.message
-    assert "need manual/rendered review" not in score.message
-
-
-def test_a5_out_of_scope_points_still_supported_for_custom_defs(tmp_path: Path) -> None:
-    # The shipped def dropped its out-of-scope points, but a custom def may still
-    # declare them — they must be reported honestly (◐/○) and excluded from the
-    # score, which then mentions the manual-review count again.
-    definition = GDSDefinition(
-        id="custom",
-        name="Custom",
-        version="1.0.0",
-        points=[
-            GDSPoint(id="lic", title="Licence", check="file", target="LICENSE", state="verified"),
-            GDSPoint(id="a11y", title="WCAG", check="out_of_scope", state="human_only"),
-            GDSPoint(id="secrets", title="Secrets", check="out_of_scope", state="evidence"),
-        ],
-    )
-    (tmp_path / "LICENSE").write_text("MIT")
-
-    by_rule = {f.rule: f for f in evaluate_gds(tmp_path, definition)}
-
-    assert by_rule["gds:a11y"].state == "human_only"
-    assert by_rule["gds:secrets"].state == "evidence"
-    score = by_rule["gds:score"]
-    assert "1/1 code-evidenceable points met" in score.message
-    assert "2 point(s) need manual/rendered review" in score.message
-
-
-def test_a5_lens_gated_on_definition(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(settings, "gds_standard", "")
-    assert GDSLens().applies_to(_state(tmp_path, ["main.tf"])) is False
-    monkeypatch.setattr(settings, "gds_standard", "default")
-    assert GDSLens().applies_to(_state(tmp_path, ["main.tf"])) is True

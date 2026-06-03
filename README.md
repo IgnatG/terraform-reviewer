@@ -25,16 +25,15 @@ run by default:
 | 💰 **Cost** | `infracost diff` | monthly cost deltas vs. the base branch |
 | 🎨 **Style** | `tflint` + `terraform fmt -check` (+ optional MegaLinter SARIF) | lint findings and formatting drift |
 
-Three more are **opt-in** (off by default, deterministic, no AI needed):
+Several more are **opt-in** (off by default, deterministic, no AI needed):
 
 | Lens | Enable with | Looks for |
 |:--|:--|:--|
-| 📋 **Standards** | `ENABLED_RULE_PACKS` | maps findings to standard controls (✅/◐/○) + flags missing README/LICENSE/… via versioned rule packs |
+| 📋 **Standards** | `enabled-rule-packs` | maps findings to standard controls (✅/◐/○) + flags missing README/LICENSE/… via versioned rule packs |
 | 🏗️ **Terraform Std** (A1) | `terraform-standard` | golden module structure: required files + `terraform{}` `required_version`/`required_providers` blocks, with a consistency score |
 | ⚙️ **CI/CD** (A2) | `cicd-standard` | `.github/workflows` posture: no `pull_request_target`, SHA-pinned actions, least-privilege `permissions`, with a posture score |
 | 🧪 **Coverage** (A3) | `coverage-report-path` | changed files below the line-coverage threshold + a repo coverage score |
 | 🧹 **Tech Debt** (A4) | `jscpd-report-path` / `sonarqube-sarif-path` | code duplication + Sonar issues on changed files + a tech-debt scorecard |
-| 🇬🇧 **GDS** (A5) | `gds-standard` | per-point GDS/TCoP readiness (✅/◐/○) — govuk-frontend, open licence, accessibility statement; rendered points honestly out of scope |
 
 Scanners own *detection and severity*; an LLM only rewords each finding into a
 concise, actionable sentence — so the set of findings is deterministic run to
@@ -97,6 +96,8 @@ additionally early-exits if no Terraform files actually changed.
 |:--|:--|:--|
 | `llm-provider` | `openai` | `openai` \| `anthropic` \| `google`. |
 | `llm-model` | `gpt-4o` | Model id — **must match the provider**. The default suits `openai`; set this when choosing another provider (e.g. `claude-sonnet-4-6`). |
+| `enable-llm-findings` | `false` | Let the LLM **propose** findings the scanners missed (◐ Evidence). Off keeps the finding set deterministic. *(Your LLM key already rewords every finding into a clear sentence on every run regardless — that's its main job; this is the separate "discover new findings" switch.)* |
+| `enabled-rule-packs` | `""` | Map findings to a named standard's controls + add ○ Human-only gap detection. `""` = off; `"*"` = all shipped packs; or a CSV of ids (e.g. `terraform-cis-aws`). |
 | `fail-on-severity` | `none` | Gate CI when a finding meets/exceeds this floor: `critical` \| `high` \| `medium` \| `low` \| `info` \| `none`. The comment is always posted first; `none` never fails the check. |
 | `scan-mode` | `full` | `full` reviews the **whole repo** (posture scan — surfaces pre-existing issues, not just the diff); `diff` scopes scanner findings to the files this PR changed. |
 | `inline-comments` | `true` | Also post one **inline** review comment per finding that sits on a changed line (see [Comment surfaces](#comment-surfaces-sticky-vs-inline)). Set `false` for sticky-comment-only. |

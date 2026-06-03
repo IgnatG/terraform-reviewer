@@ -35,22 +35,44 @@ jobs:
       contents: read
       pull-requests: write
       security-events: write # so the SARIF lands in the Security → Code scanning tab
+    # Full input reference — each shown at (or with) its default. Set only the
+    # ones you want to change; the rest fall back to these.
     with:
-      llm-provider: anthropic
-      llm-model: claude-sonnet-4-6
-      fail-on-severity: high # fail the check on any high/critical finding
-      # scan-mode: full        # full=whole-repo posture (default) · diff=changed files only
-      # inline-comments: true  # comment on findings that sit on changed lines (default on)
-      # Wedge lenses (deterministic, no AI needed). "default" uses the built-in
-      # golden standards; point at a committed JSON to enforce your own house
-      # standard (e.g. terraform-standard: .assessor/terraform-house.json).
-      # See examples/README.md. Omit (or leave "") to keep a lens off.
-      terraform-standard: default # A1: golden module structure + terraform{} blocks
-      cicd-standard: default # A2: .github/workflows posture (SHA pins, permissions)
+      # ── LLM (rewords scanner findings into clear sentences) ──────────────────
+      llm-provider: anthropic # default: openai · openai | anthropic | google
+      llm-model: claude-sonnet-4-6 # default: gpt-4o · must match llm-provider
+      # NOTE: your LLM key already rewords every scanner finding into a clear
+      # sentence on every run — that's its main job, no toggle needed. This is the
+      # *separate* switch for letting the LLM also PROPOSE findings the scanners
+      # missed (◐ Evidence): default false to keep the finding set deterministic;
+      # true trades reproducibility for extra coverage.
+      enable-llm-findings: false
+
+      # ── CI gating & scan scope ───────────────────────────────────────────────
+      fail-on-severity: high # default: none · critical|high|medium|low|info|none
+      scan-mode: full # default: full (whole-repo posture) · diff (changed files only)
+      inline-comments: true # default: true · one PR comment per finding on a changed line
+
+      # ── Deterministic lenses (no AI key needed) ──────────────────────────────
+      # "" = off · "default" = built-in golden standard · or a path to your own JSON
+      # (e.g. terraform-standard: .assessor/terraform-house.json). See examples/README.md.
+      terraform-standard: default # default: "" · A1 module structure + terraform{} blocks
+      cicd-standard: default # default: "" · A2 .github/workflows posture (SHA pins, perms)
+      # default: "". Maps findings to a standard's controls + adds ○ Human-only gap
+      # detection. "*" = all shipped packs · CSV of ids, e.g. "terraform-cis-aws".
+      enabled-rule-packs: ""
+
+      # ── External report ingestion (off unless you pass a path) ───────────────
+      coverage-report-path: "" # default: "" · A3 lcov/cobertura/jacoco your CI produced
+      jscpd-report-path: "" # default: "" · A4 jscpd duplication JSON
+      sonarqube-sarif-path: "" # default: "" · A4 SonarQube SARIF export
+
       # pull_request runs read the event; manual runs use the dispatch input.
       pr-number: ${{ github.event.pull_request.number || inputs.pr-number }}
     secrets:
+      # One LLM key, matching llm-provider above:
       anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-      infracost-api-key: ${{ secrets.INFRACOST_API_KEY }}
-      # github-token defaults to the caller's github.token; override only if you
-      # need a token with broader scope.
+      # openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+      # google-api-key: ${{ secrets.GOOGLE_API_KEY }}
+      infracost-api-key: ${{ secrets.INFRACOST_API_KEY }} # enables the 💰 cost lens
+      # github-token: defaults to the caller's github.token; override for broader scope.

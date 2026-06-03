@@ -57,7 +57,7 @@
         },
         "lens": {
           "type": ["string", "null"],
-          "description": "Assessor lens (A1-A5). Null until the lens registry lands (Phase 2)."
+          "description": "Assessor lens (A1-A4). Null until the lens registry lands (Phase 2)."
         },
         "category": {
           "type": "string",
@@ -65,7 +65,7 @@
         },
         "standard": {
           "type": ["string", "null"],
-          "description": "Mapped standard (e.g. gds, dspt, terraform-house). Null until the standard-mapping layer lands (Phase 4)."
+          "description": "Mapped standard (e.g. cis, terraform-house). Null until the standard-mapping layer lands (Phase 4)."
         },
         "standard_version": { "type": ["string", "null"] },
         "control_id": {

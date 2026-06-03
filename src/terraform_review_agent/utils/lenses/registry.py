@@ -14,7 +14,6 @@ from terraform_review_agent.utils.lenses.base import Lens
 from terraform_review_agent.utils.lenses.cicd import CICDLens
 from terraform_review_agent.utils.lenses.cost import CostLens
 from terraform_review_agent.utils.lenses.coverage import CoverageLens
-from terraform_review_agent.utils.lenses.gds import GDSLens
 from terraform_review_agent.utils.lenses.security import SecurityLens
 from terraform_review_agent.utils.lenses.standards import StandardsLens
 from terraform_review_agent.utils.lenses.style import StyleLens
@@ -33,7 +32,6 @@ ALL_LENSES: tuple[Lens, ...] = (
     CICDLens(),
     CoverageLens(),
     TechDebtLens(),
-    GDSLens(),
 )
 
 LENSES_BY_ID: dict[str, Lens] = {lens.id: lens for lens in ALL_LENSES}

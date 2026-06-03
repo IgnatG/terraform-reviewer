@@ -21,7 +21,6 @@ Severity = Literal["critical", "high", "medium", "low", "info"]
 #   cicd                — A2 CI/CD Standardiser (.github/workflows posture)
 #   coverage            — A3 Test Coverage & Gap Analyser
 #   tech-debt           — A4 Tech-Debt Scorecard
-#   gds                 — A5 GDS Readiness Scanner
 AgentName = Literal[
     "security",
     "cost",
@@ -31,14 +30,13 @@ AgentName = Literal[
     "cicd",
     "coverage",
     "tech-debt",
-    "gds",
 ]
-# The Assessor lens code (A1-A5) a finding belongs to, stamped by the A-coded
+# The Assessor lens code (A1-A4) a finding belongs to, stamped by the A-coded
 # lenses; the ported originals leave it unset. Surfaced as `lens` in findings.json.
-LensCode = Literal["A1", "A2", "A3", "A4", "A5"]
+LensCode = Literal["A1", "A2", "A3", "A4"]
 # Three-state classification (✅ verified / ◐ evidence / ○ human_only). A finding
-# may assert it intrinsically (gap + A5 GDS points); otherwise the standard-
-# mapping layer derives it. Mirrors ControlState in utils.standards.pack.
+# may assert it intrinsically (gap checks); otherwise the standard-mapping
+# layer derives it. Mirrors ControlState in utils.standards.pack.
 ThreeState = Literal["verified", "evidence", "human_only"]
 
 TERRAFORM_SUFFIXES = (".tf", ".tfvars", ".tf.json", ".tfvars.json")
@@ -131,7 +129,7 @@ class Finding(BaseModel):
     """A single normalized review finding produced by a specialist agent."""
 
     agent: AgentName
-    # The Assessor lens code (A1-A5) when an A-coded lens produced this finding;
+    # The Assessor lens code (A1-A4) when an A-coded lens produced this finding;
     # the original security/cost/style/standards producers leave it None.
     lens: LensCode | None = None
     severity: Severity
@@ -140,8 +138,8 @@ class Finding(BaseModel):
     rule: str
     message: str
     suggestion: str | None = None
-    # Intrinsic three-state classification when the lens knows it directly (A5
-    # GDS points, gap checks); otherwise None and the standard-mapping layer
+    # Intrinsic three-state classification when the lens knows it directly (gap
+    # checks); otherwise None and the standard-mapping layer
     # derives the state in the findings report.
     state: ThreeState | None = None
 

@@ -1,6 +1,6 @@
 """Rule-pack data model — the versioned, cited unit of the standard-mapping layer.
 
-A rule pack ties raw scanner findings to a **standard** (CIS, GDS, an internal
+A rule pack ties raw scanner findings to a **standard** (CIS, an internal
 framework …): it maps a finding's ``{source}:{rule}`` to a **control id**, and
 declares **expected artefacts** whose absence is itself a finding (gap
 detection). Every pack carries a ``standard_version`` + ``rule_pack_version`` and

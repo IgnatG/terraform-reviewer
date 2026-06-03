@@ -84,7 +84,7 @@ class Settings(BaseSettings):
 
     # Scan scope (Phase 10). "full" (default) reports findings across the whole
     # repo — the assessor's posture scan; "diff" scopes scanner findings to the
-    # files this PR changed. Repo-level lenses (A1/A2/A5, gap detection) are
+    # files this PR changed. Repo-level lenses (A1/A2, gap detection) are
     # always whole-repo; this only governs the diff-scoped scanner lenses.
     scan_mode: ScanMode = "full"
 
@@ -110,10 +110,6 @@ class Settings(BaseSettings):
     # writes a report; set the path to ingest it. Empty = that signal is skipped.
     jscpd_report_path: str | None = None  # jscpd duplication JSON
     sonarqube_sarif_path: str | None = None  # SonarQube issues exported as SARIF
-
-    # A5 GDS Readiness Scanner (Phase 7). Like the wedge lenses: empty = off,
-    # "default" = the built-in points definition, a path = a custom one.
-    gds_standard: str = ""
 
     # Standard-mapping layer (Phase 4). Which rule packs are active:
     #   empty (default) -> none (mapping inert; findings carry no control_id)
