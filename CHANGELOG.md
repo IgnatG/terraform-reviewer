@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.3.1...v1.4.0) (2026-06-03)
+
+
+### Features
+
+* **copilot:** :sparkles: enhance Copilot CLI integration with programmatic flags ([e6a1b1e](https://github.com/IgnatG/terraform-reviewer/commit/e6a1b1e3ce14c356d0d292866796f8e77cec98b1))
+* **copilot:** :sparkles: integrate GitHub Copilot SDK for AI backend functionality ([c854913](https://github.com/IgnatG/terraform-reviewer/commit/c85491308b79545013d90ca1faef225ca0806c66))
+
 ## [1.3.1](https://github.com/IgnatG/terraform-reviewer/compare/v1.3.0...v1.3.1) (2026-06-03)
 
 
