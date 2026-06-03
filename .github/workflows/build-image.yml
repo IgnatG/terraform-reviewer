@@ -1,5 +1,7 @@
 name: build-image
 
+run-name: "Build image v${{ inputs.version }}"
+
 # Builds the prebuilt reviewer image and pushes it to GHCR. Invoked by the
 # release-please workflow on a release (workflow_call with the new version), or
 # manually (workflow_dispatch). Releases own versioning now, so there is no

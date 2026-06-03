@@ -1,5 +1,7 @@
 name: release-please
 
+run-name: "Release-please · ${{ github.ref_name }}"
+
 # Automated releases from Conventional Commits (https://www.conventionalcommits.org).
 # release-please keeps an open "release PR" that accumulates the changelog +
 # version bumps; merging it cuts the release:
@@ -42,6 +44,10 @@ jobs:
       major: ${{ steps.rp.outputs.major }}
       minor: ${{ steps.rp.outputs.minor }}
       version: ${{ steps.rp.outputs.version }}
+      # Set when a release PR is opened OR updated; `pr` carries that PR's JSON
+      # (incl. headBranchName) so sync-lock can re-lock on the right branch.
+      prs_created: ${{ steps.rp.outputs.prs_created }}
+      pr: ${{ steps.rp.outputs.pr }}
     steps:
       # RELEASE_PAT (a PAT with contents + pull-requests scope) makes the release
       # PR run CI AND lets release-please open the PR without the org/repo
@@ -56,6 +62,49 @@ jobs:
           target-branch: main
         # config-file + manifest-file default to release-please-config.json and
         # .release-please-manifest.json, which we ship at the repo root.
+
+  sync-lock:
+    # release-please bumps `version` in pyproject.toml but NOT uv.lock, so the
+    # lockfile's own package version drifts on the release PR and CI's
+    # `uv lock --check` (make lint) fails. release-please can't fix this itself:
+    # its generic updater needs an `x-release-please-version` annotation, which
+    # `uv lock` strips on any real rewrite (e.g. a Dependabot bump), so the marker
+    # never survives (googleapis/release-please#2561). Instead we re-lock on the
+    # release branch — `uv lock` writes the bumped pyproject version into uv.lock —
+    # and push it back with the PAT so CI re-runs and goes green. Runs after
+    # release-please has (re)written the branch; the push lands on the release
+    # branch (not main), so it doesn't re-trigger this workflow — no loop.
+    needs: release-please
+    if: needs.release-please.outputs.prs_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          # Push back with the PAT (not GITHUB_TOKEN) so the commit re-triggers CI.
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+
+      - name: Re-lock against the bumped pyproject version
+        run: uv lock
+
+      - name: Commit the synced lockfile (only if it changed)
+        run: |
+          set -euo pipefail
+          if git diff --quiet uv.lock; then
+            echo "uv.lock already in sync — nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "deps: sync uv.lock to the release version"
+          git push
 
   tag-floats:
     needs: release-please

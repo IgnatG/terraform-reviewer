@@ -1,5 +1,7 @@
 name: ci
 
+run-name: "CI · ${{ github.head_ref || github.ref_name }} · @${{ github.actor }}"
+
 # Lint, type-check, and test the Python code on every PR and on pushes to main.
 # Runs the same `make` targets developers use locally (CLAUDE.md §8) so CI and
 # local checks never drift. `make lint` also runs `uv lock --check`, failing the

@@ -44,6 +44,25 @@ workflows**, so `build-image.yml` can't watch for the release tag. Instead
 true`. `build-image.yml` is also `workflow_dispatch`-able with a `version` input
 for manual rebuilds.
 
+## Keeping uv.lock in sync (the `sync-lock` job)
+
+release-please bumps `version` in `pyproject.toml` but **not** in `uv.lock`, so on
+the release PR the lockfile's own package version drifts and CI's `uv lock
+--check` (via `make lint`) fails. release-please **can't** fix this natively — it's
+the open [release-please#2561](https://github.com/googleapis/release-please/issues/2561),
+and the `extra-files` generic-updater workaround doesn't hold because `uv lock`
+strips the `x-release-please-version` annotation on any real rewrite (e.g. a
+Dependabot bump), so the marker never survives.
+
+So `release-please.yml` carries a **`sync-lock` job** (no separate workflow file):
+gated on `prs_created == 'true'`, it checks out the release PR branch (from the
+`pr` output's `headBranchName`), runs `uv lock` — which writes the bumped pyproject
+version into `uv.lock` — and pushes the result back **with `RELEASE_PAT`** so the
+commit re-triggers CI. It runs *after* the `release-please` job has (re)written the
+branch, and the push lands on the release branch (not `main`), so it doesn't
+re-trigger the workflow — no loop. (This is the second consumer of `RELEASE_PAT`,
+alongside release-please itself.)
+
 ## One-time setup on GitHub
 
 - **Settings → Actions → General →** enable *"Allow GitHub Actions to create and
@@ -148,7 +167,8 @@ Consumers still get reproducible *workflow logic* by pinning the git ref
   settings (`include-component-in-tag: false`).
 - `.release-please-manifest.json` — the current released version (source of
   truth; release-please updates it on each release).
-- `.github/workflows/release-please.yml` — the release + tag-major + build jobs.
+- `.github/workflows/release-please.yml` — the release + sync-lock + tag-floats +
+  build jobs (sync-lock re-locks `uv.lock` on the release branch; see above).
 - README/examples use the `@v1` float so they never need a manual bump.
 
 ## Bootstrapping note
