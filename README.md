@@ -74,8 +74,9 @@ infrastructure to host — you add one reusable-workflow call and a provider key
   areas, so rewordings and discoveries target what actually moves risk and cost.
 
 - **Multi-provider.** OpenAI, Anthropic, Google Gemini, or Azure OpenAI — pick via
-  `llm-provider`/`llm-model`. A GitHub Copilot reword-only backend is also
-  available. AI is optional: with no key, the deterministic report still posts.
+  `llm-provider`/`llm-model`. Or set `ai-backend: copilot` to reuse a GitHub
+  Copilot seat (no separate LLM key). AI is optional: with no key, the
+  deterministic report still posts.
 
 - **Three-state confidence.** Every finding is tagged ✅ **Verified** (a
   deterministic scanner caught it), ◐ **Evidence** (AI-suggested), or ○ **Human
@@ -163,7 +164,8 @@ additionally early-exits if no Terraform files actually changed.
 
 | Input | Default | Description |
 |:--|:--|:--|
-| `llm-provider` | `openai` | `openai` \| `anthropic` \| `google`. |
+| `ai-backend` | `byok` | Who rewords the findings: `byok` (your own provider key — `llm-provider`/`llm-model` below) or `copilot` (the bundled GitHub Copilot CLI, driven via the `github-copilot-sdk` — reuses a Copilot seat so no separate LLM key is needed). `copilot` needs the `copilot-github-token` secret; with it, `llm-model` must be a Copilot-catalog id (e.g. `gpt-5`). See [Security](#security). |
+| `llm-provider` | `openai` | `openai` \| `anthropic` \| `google`. *(byok only.)* |
 | `llm-model` | `gpt-4o` | Model id — **must match the provider**. The default suits `openai`; set this when choosing another provider (e.g. `claude-sonnet-4-6`). |
 | `enable-llm-findings` | `false` | Let the LLM **propose** findings the scanners missed (◐ Evidence), scoped to the PR's **changed files**. Off keeps the finding set deterministic. *(Your LLM key already rewords every finding into a clear sentence on every run regardless — that's its main job; this is the separate "discover new findings" switch.)* For a **whole-codebase** LLM pass, set `llm-full-review` below. |
 | `llm-full-review` | `false` | **Whole-codebase LLM review**: when `true`, the LLM is fed **every** `.tf` file in the repo (not just the diff) and discovery is forced on — regardless of `enable-llm-findings`. Costs more tokens and is less reproducible, so it's opt-in. See [Whole-codebase LLM review](#whole-codebase-llm-review). |
@@ -179,7 +181,8 @@ additionally early-exits if no Terraform files actually changed.
 
 | Secret | Required | Description |
 |:--|:--|:--|
-| `openai-api-key` / `anthropic-api-key` / `google-api-key` | one, matching `llm-provider` | LLM credentials. |
+| `copilot-github-token` | when `ai-backend: copilot` | A fine-grained PAT with the **"Copilot Requests"** permission, or an OAuth token — classic `ghp_` tokens are rejected. Ignored for `byok`. |
+| `openai-api-key` / `anthropic-api-key` / `google-api-key` | one, matching `llm-provider` (byok) | LLM credentials. |
 | `infracost-api-key` | optional | Enables the 💰 cost agent. When unset, cost review is skipped (security + style still run). Get a free key at [infracost.io](https://www.infracost.io/). |
 | `github-token` | optional | Defaults to the caller's `${{ github.token }}`. Override only if you need broader scope. |
 

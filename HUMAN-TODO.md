@@ -33,10 +33,15 @@ remains here is verification / dogfooding / curation.
 
 ## AI backend (needs the Copilot CLI + a PAT) — _added when Phase 6 lands_
 
-- [ ] **Verify the GitHub Copilot backend against a live PAT.** Needs Node + the
-  Copilot CLI installed alongside the engine and a `COPILOT_GITHUB_TOKEN`. BYOK
-  (OpenAI/Anthropic/Gemini/Azure) is the tested default and needs nothing extra.
-  *(Phase 6 "Done when" — Copilot half)*
+- [ ] **Verify the GitHub Copilot backend against a live PAT.** The backend now
+  drives the official `github-copilot-sdk` over the standalone Copilot CLI the
+  image bundles (no Node runtime). Set `ai-backend: copilot` + the
+  `copilot-github-token` secret (a fine-grained PAT with the "Copilot Requests"
+  permission) and confirm a PR's findings get reworded. Two things only a live
+  run / CI image build can confirm: (a) the SDK's real session round-trips on a
+  PAT, and (b) the Dockerfile's `copilot-linux-*.tar.gz` extraction lands the
+  binary where `copilot --version` finds it (the build guards this, but it's
+  never been built here). BYOK stays the tested default. *(Phase 6 "Done when")*
 
 ## Dashboard (needs the hosted ingest endpoint + a key) — _added when Phase 9 lands_
 

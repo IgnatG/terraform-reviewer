@@ -16,6 +16,9 @@ ARG TFSEC_VERSION=1.28.14
 ARG TFLINT_VERSION=0.62.1
 ARG INFRACOST_VERSION=0.10.44
 ARG TRIVY_VERSION=0.71.0
+# GitHub Copilot CLI — the standalone binary the github-copilot-sdk drives when
+# AI_BACKEND=copilot. Self-contained (no Node runtime). Bump = rebuild-image PR.
+ARG COPILOT_CLI_VERSION=1.0.59
 
 # ---------------------------------------------------------------------------
 # Stage 1 — fetch pinned scanner binaries (arch-aware via buildx TARGETARCH)
@@ -27,6 +30,7 @@ ARG TFSEC_VERSION
 ARG TFLINT_VERSION
 ARG INFRACOST_VERSION
 ARG TRIVY_VERSION
+ARG COPILOT_CLI_VERSION
 # TARGETARCH is auto-populated by buildx ("amd64" / "arm64"); matches the
 # terraform/tfsec/tflint/infracost asset naming directly. trivy uses its own arch
 # labels, mapped below.
@@ -79,6 +83,26 @@ RUN chmod +x /out/* \
          "$b" --version >/dev/null 2>&1 || { echo "binary failed to execute: $b" >&2; exit 1; }; \
        done
 
+# GitHub Copilot CLI (standalone self-contained binary — no Node runtime). Kept
+# out of /out because the tarball is a tree, not a lone binary; the loop above
+# verifies single binaries only. We locate the `copilot` executable wherever the
+# tarball nests it, pin it at a stable path, and `--version` it so a wrong-arch
+# or moved-layout download fails the build here rather than shipping broken.
+RUN case "${TARGETARCH}" in \
+      amd64) CP_ARCH=x64 ;; \
+      arm64) CP_ARCH=arm64 ;; \
+      *) echo "unsupported TARGETARCH for copilot: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && mkdir -p /opt/copilot/bin \
+    && curl -fsSL -o copilot.tar.gz \
+      "https://github.com/github/copilot-cli/releases/download/v${COPILOT_CLI_VERSION}/copilot-linux-${CP_ARCH}.tar.gz" \
+    && tar -xzf copilot.tar.gz -C /opt/copilot \
+    && CP_BIN="$(find /opt/copilot -type f -name copilot | head -n1)" \
+    && if [ -z "$CP_BIN" ]; then echo "copilot binary not found in tarball" >&2; exit 1; fi \
+    && chmod +x "$CP_BIN" \
+    && ln -sf "$CP_BIN" /opt/copilot/bin/copilot \
+    && /opt/copilot/bin/copilot --version
+
 # ---------------------------------------------------------------------------
 # Stage 2 — build the Python venv (build tools confined to this stage)
 # ---------------------------------------------------------------------------
@@ -118,7 +142,7 @@ FROM python:3.14-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/app/.venv \
-    PATH="/app/.venv/bin:${PATH}"
+    PATH="/opt/copilot/bin:/app/.venv/bin:${PATH}"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
@@ -129,6 +153,10 @@ WORKDIR /app
 
 # Scanner binaries on PATH for every user.
 COPY --from=scanners /out/ /usr/local/bin/
+
+# Copilot CLI tree (its bin/ is on PATH via the ENV above). Bundled for the
+# optional AI_BACKEND=copilot path; BYOK never invokes it.
+COPY --from=scanners /opt/copilot /opt/copilot
 
 # Python venv (identical /app/.venv path keeps the editable install valid).
 COPY --from=builder /app/.venv /app/.venv

@@ -31,13 +31,20 @@ dev = [
     "types-requests",
     "types-pyyaml",
     "jsonschema>=4.26",
+    # Pure-Python client for the optional Copilot backend; here so CI can import
+    # it to exercise the backend's tests (the CLI it drives is bundled only in
+    # the image — live behaviour stays a HUMAN-TODO verification step).
+    "github-copilot-sdk>=1.0",
 ]
-# Scanner installed into the container image (kept out of the default/dev
-# install — local unit tests mock the checkov subprocess). Pinned here so the
-# lockfile captures checkov *and its transitive tree*; the binary scanners
-# (terraform/tfsec/tflint/infracost) stay pinned via Dockerfile ARGs.
+# Installed into the container image (kept out of the default install). Pinned so
+# the lockfile captures the full transitive tree; the binary scanners + Copilot
+# CLI stay pinned via Dockerfile ARGs.
+#   * checkov — the Python security scanner.
+#   * github-copilot-sdk — the Copilot backend's client (AI_BACKEND=copilot);
+#     pure Python, but it drives the Copilot CLI the Dockerfile installs.
 container = [
     "checkov==3.2.532",
+    "github-copilot-sdk>=1.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -65,7 +72,7 @@ files = ["src"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["langgraph.*", "langchain_core.*", "langchain_openai.*", "langchain_anthropic.*", "langchain_google_genai.*"]
+module = ["langgraph.*", "langchain_core.*", "langchain_openai.*", "langchain_anthropic.*", "langchain_google_genai.*", "copilot.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

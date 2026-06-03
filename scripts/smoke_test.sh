@@ -4,7 +4,7 @@
 # image build (and therefore CI) before anything is pushed.
 set -euo pipefail
 
-bins=(terraform tfsec tflint infracost checkov trivy)
+bins=(terraform tfsec tflint infracost checkov trivy copilot)
 
 fail=0
 for b in "${bins[@]}"; do

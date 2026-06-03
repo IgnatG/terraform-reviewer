@@ -8,7 +8,6 @@ the deterministic findings rather than blocking the report.
 
 from __future__ import annotations
 
-import subprocess
 from typing import Any
 
 import pytest
@@ -141,53 +140,124 @@ def test_extract_json_object_handles_fences_prose_and_strings() -> None:
     assert _extract_json_object("no json here") is None
 
 
-def test_copilot_available_needs_token_and_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_copilot_available_needs_token_cli_and_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "copilot_cli_command", "copilot")
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
+    monkeypatch.setattr(copilot_mod.importlib.util, "find_spec", lambda _n: object())
     monkeypatch.setattr(settings, "copilot_github_token", None)
-    assert CopilotBackend().available() is False  # CLI present but no token
+    assert CopilotBackend().available() is False  # CLI + SDK present but no token
     monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
     assert CopilotBackend().available() is True
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: None)
-    assert CopilotBackend().available() is False  # token but no CLI
+    assert CopilotBackend().available() is False  # token + SDK but no CLI
+    monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
+    monkeypatch.setattr(copilot_mod.importlib.util, "find_spec", lambda _n: None)
+    assert CopilotBackend().available() is False  # token + CLI but SDK not installed
 
 
-def _fake_cli(stdout: str, returncode: int = 0) -> Any:
-    def _run(_cmd: list[str], **_kw: Any) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args=_cmd, returncode=returncode, stdout=stdout, stderr=""
-        )
-
-    return _run
+# --- Fake Copilot SDK ------------------------------------------------------
+# The real SDK drives the Copilot CLI over stdio; these fakes stand in for its
+# async client/session/event surface so the backend's wiring + parsing are
+# testable without the CLI (live behaviour is a HUMAN-TODO verification step).
 
 
-def test_copilot_annotate_parses_cli_json(monkeypatch: pytest.MonkeyPatch) -> None:
+class _FakeAssistantMessage:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class _FakeIdle:
+    pass
+
+
+class _FakeEvent:
+    def __init__(self, data: Any) -> None:
+        self.data = data
+
+
+class _FakePermissionHandler:
+    approve_all = "approve-all-sentinel"
+
+
+class _FakeRuntimeConnection:
+    @staticmethod
+    def for_stdio(path: Any = None, args: Any = None) -> str:
+        return f"stdio:{path}"
+
+
+def _install_fake_sdk(
+    monkeypatch: pytest.MonkeyPatch, *, response_events: list[Any]
+) -> dict[str, Any]:
+    """Patch ``_load_sdk`` to a fake; return a dict recording what the backend sent."""
+
+    record: dict[str, Any] = {}
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self._cb: Any = None
+
+        def on(self, cb: Any) -> None:
+            self._cb = cb
+
+        async def send(self, prompt: str) -> None:
+            record["prompt"] = prompt
+            for data in response_events:
+                self._cb(_FakeEvent(data))
+
+        async def __aenter__(self) -> FakeSession:
+            return self
+
+        async def __aexit__(self, *_a: Any) -> bool:
+            return False
+
+    class FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            record["client_kwargs"] = kwargs
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_a: Any) -> bool:
+            return False
+
+        async def create_session(self, **kwargs: Any) -> FakeSession:
+            record["session_kwargs"] = kwargs
+            return FakeSession()
+
+    sdk = copilot_mod._Sdk(
+        CopilotClient=FakeClient,
+        RuntimeConnection=_FakeRuntimeConnection,
+        PermissionHandler=_FakePermissionHandler,
+        AssistantMessageData=_FakeAssistantMessage,
+        SessionIdleData=_FakeIdle,
+    )
+    monkeypatch.setattr(copilot_mod, "_load_sdk", lambda: sdk)
+    return record
+
+
+def test_copilot_annotate_parses_sdk_reply(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
     monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
-    monkeypatch.setattr(
-        copilot_mod.subprocess,
-        "run",
-        _fake_cli(
-            'Here you go:\n{"annotations": [{"id": 0, "message": "clearer", "suggestion": null}]}'
-        ),
+    # Two assistant chunks that only form valid JSON once concatenated, then idle.
+    _install_fake_sdk(
+        monkeypatch,
+        response_events=[
+            _FakeAssistantMessage('Here you go:\n{"annotations": [{"id": 0, '),
+            _FakeAssistantMessage('"message": "clearer", "suggestion": null}]}'),
+            _FakeIdle(),
+        ],
     )
     result = CopilotBackend().annotate("sys", "human")
     assert result.annotations[0].id == 0
     assert result.annotations[0].message == "clearer"
 
 
-def test_copilot_annotate_raises_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
-    monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
-    monkeypatch.setattr(copilot_mod.subprocess, "run", _fake_cli("boom", returncode=1))
-    with pytest.raises(CopilotError, match="exited 1"):
-        CopilotBackend().annotate("sys", "human")
-
-
 def test_copilot_annotate_raises_on_no_json(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
     monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
-    monkeypatch.setattr(copilot_mod.subprocess, "run", _fake_cli("no json at all"))
+    _install_fake_sdk(
+        monkeypatch, response_events=[_FakeAssistantMessage("no json at all"), _FakeIdle()]
+    )
     with pytest.raises(CopilotError, match="no JSON"):
         CopilotBackend().annotate("sys", "human")
 
@@ -195,71 +265,57 @@ def test_copilot_annotate_raises_on_no_json(monkeypatch: pytest.MonkeyPatch) -> 
 def test_copilot_annotate_raises_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
     monkeypatch.setattr(settings, "copilot_github_token", None)
+    _install_fake_sdk(monkeypatch, response_events=[_FakeIdle()])
     with pytest.raises(CopilotError, match="COPILOT_GITHUB_TOKEN"):
         CopilotBackend().annotate("sys", "human")
 
 
-def test_copilot_annotate_raises_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A hung CLI must surface as CopilotError (which the caller degrades on),
-    # never as a raw TimeoutExpired escaping the backend.
+def test_copilot_annotate_raises_when_sdk_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The optional package isn't installed → degrade, never crash the report.
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
     monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
 
-    def _timeout(*_a: Any, **_kw: Any) -> Any:
-        raise subprocess.TimeoutExpired(cmd="copilot", timeout=1)
+    def _missing() -> Any:
+        raise CopilotError("github-copilot-sdk is not installed")
 
-    monkeypatch.setattr(copilot_mod.subprocess, "run", _timeout)
+    monkeypatch.setattr(copilot_mod, "_load_sdk", _missing)
+    with pytest.raises(CopilotError, match="not installed"):
+        CopilotBackend().annotate("sys", "human")
+
+
+def test_copilot_annotate_raises_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A hung session must surface as CopilotError (which the caller degrades on),
+    # never as a raw TimeoutError escaping the backend.
+    monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
+    monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
+    _install_fake_sdk(monkeypatch, response_events=[_FakeIdle()])
+
+    async def _raise_timeout(awaitable: Any, timeout: Any) -> Any:
+        awaitable.close()  # avoid "coroutine was never awaited" noise
+        raise TimeoutError
+
+    monkeypatch.setattr(copilot_mod.asyncio, "wait_for", _raise_timeout)
     with pytest.raises(CopilotError, match="timed out"):
         CopilotBackend().annotate("sys", "human")
 
 
-def test_copilot_passes_token_via_env_not_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Security contract: the token goes in the subprocess env, never on argv.
+def test_copilot_passes_token_and_model_via_sdk_not_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Security/behaviour contract: the token rides the SDK's github_token kwarg
+    # (never argv/connection string), tools are auto-approved so the agentic CLI
+    # can't block, and the configured model + folded prompt reach the session.
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
     monkeypatch.setattr(settings, "copilot_github_token", SecretStr("s3cr3t"))
-    captured: dict[str, Any] = {}
-
-    def _run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
-        captured["cmd"] = cmd
-        captured["env"] = kw.get("env")
-        return subprocess.CompletedProcess(
-            args=cmd, returncode=0, stdout='{"annotations": []}', stderr=""
-        )
-
-    monkeypatch.setattr(copilot_mod.subprocess, "run", _run)
+    monkeypatch.setattr(settings, "default_llm_model", "gpt-5")
+    record = _install_fake_sdk(monkeypatch, response_events=[_FakeIdle()])
     CopilotBackend().annotate("sys", "human")
 
-    assert captured["env"]["COPILOT_GITHUB_TOKEN"] == "s3cr3t"
-    assert "s3cr3t" not in " ".join(captured["cmd"])
-
-
-def test_copilot_invokes_cli_with_programmatic_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The non-interactive contract: --allow-all-tools (else the CLI blocks on a
-    # tool-confirmation prompt it can't receive and times out) + --silent + -p.
-    # Crucially NOT --allow-all-paths/--allow-all-urls/--allow-all, so the
-    # agent's filesystem and URL access stay gated.
-    monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
-    monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
-    captured: dict[str, Any] = {}
-
-    def _run(cmd: list[str], **_kw: Any) -> subprocess.CompletedProcess[str]:
-        captured["cmd"] = cmd
-        return subprocess.CompletedProcess(
-            args=cmd, returncode=0, stdout='{"annotations": []}', stderr=""
-        )
-
-    monkeypatch.setattr(copilot_mod.subprocess, "run", _run)
-    CopilotBackend().annotate("sys", "human")
-
-    cmd = captured["cmd"]
-    assert "--allow-all-tools" in cmd
-    assert "--silent" in cmd
-    assert "--allow-all-paths" not in cmd
-    assert "--allow-all-urls" not in cmd
-    assert "--allow-all" not in cmd
-    # The prompt rides as the value of -p (last arg), not interpolated into flags.
-    assert cmd[-2] == "-p"
-    assert cmd[-1].startswith("sys\n\nhuman")
+    assert record["client_kwargs"]["github_token"] == "s3cr3t"
+    assert "s3cr3t" not in str(record["client_kwargs"]["connection"])
+    assert record["session_kwargs"]["model"] == "gpt-5"
+    assert record["session_kwargs"]["on_permission_request"] == "approve-all-sentinel"
+    assert record["prompt"].startswith("sys\n\nhuman")
 
 
 # ---------------------------------------------------------------------------

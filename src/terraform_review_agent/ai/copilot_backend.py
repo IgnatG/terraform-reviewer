@@ -1,15 +1,24 @@
-"""GitHub Copilot AI backend — rewords findings via the bundled Copilot CLI.
+"""GitHub Copilot AI backend — rewords findings via the official Copilot SDK.
 
-Used when ``AI_BACKEND=copilot``. Shells out to the Copilot CLI (command +
-timeout configurable) in non-interactive mode with ``COPILOT_GITHUB_TOKEN`` in
-its environment, asks for a single JSON object matching
-:class:`SpecialistAnnotations`, and parses it back.
+Used when ``AI_BACKEND=copilot``. Drives the ``github-copilot-sdk`` (a thin
+async client over the locally-installed Copilot CLI, spoken to over stdio) in a
+single-prompt round-trip: open a session, ``send`` the specialist prompt, gather
+the assistant's reply, and parse it back into a :class:`SpecialistAnnotations`.
 
-The exact CLI invocation is isolated in :meth:`CopilotBackend._invoke_cli` —
-the one seam to adjust for the installed CLI — so the JSON-extraction and the
-reword-only guardrail (the validated return type) are independent of it. Every
-failure raises :class:`CopilotError`; the caller degrades to the un-reworded
-deterministic findings, so Copilot can never block the report (§9.2).
+Reusing a Copilot seat is the whole point — a user already paying for Copilot
+needs no separate LLM key. Every failure raises :class:`CopilotError`; the caller
+degrades to the un-reworded deterministic findings, so Copilot can never block
+the report (§9.2).
+
+Two deliberate choices:
+
+* **Lazy SDK import** (via :func:`_load_sdk`). The package is optional — BYOK
+  users never install it — so importing it at module top would break the default
+  backend. The single ``_load_sdk`` seam also keeps the SDK's event classes
+  patchable in tests without the real package.
+* **System text folded into the prompt.** We pass ``system + human`` as one
+  ``send`` rather than via ``SystemMessageConfig`` — the reword-only guardrail is
+  the narrow :class:`SpecialistAnnotations` return type, not the transport.
 
 > Live behaviour against a real CLI + PAT is a human verification step (see
 > HUMAN-TODO.md) — it can't be exercised on a machine without the Copilot CLI.
@@ -17,9 +26,10 @@ deterministic findings, so Copilot can never block the report (§9.2).
 
 from __future__ import annotations
 
-import os
+import asyncio
+import importlib.util
 import shutil
-import subprocess
+from typing import Any, NamedTuple
 
 from terraform_review_agent.ai.base import AIBackend
 from terraform_review_agent.config import settings
@@ -34,13 +44,43 @@ _JSON_INSTRUCTION = (
 
 
 class CopilotError(RuntimeError):
-    """Raised when the Copilot CLI is missing, fails, or returns no usable JSON."""
+    """Raised when the Copilot SDK/CLI is missing, fails, or returns no JSON."""
+
+
+class _Sdk(NamedTuple):
+    """The handful of ``github-copilot-sdk`` symbols this backend drives."""
+
+    CopilotClient: Any
+    RuntimeConnection: Any
+    PermissionHandler: Any
+    AssistantMessageData: Any
+    SessionIdleData: Any
+
+
+def _load_sdk() -> _Sdk:
+    """Import the optional Copilot SDK, or raise :class:`CopilotError`.
+
+    The one seam the tests patch — fake SDK symbols swap in here without the real
+    (CLI-dependent) package present.
+    """
+
+    try:
+        from copilot import CopilotClient, RuntimeConnection
+        from copilot.session import PermissionHandler
+        from copilot.session_events import AssistantMessageData, SessionIdleData
+    except ImportError as exc:  # pragma: no cover - exercised via patched _load_sdk
+        raise CopilotError(
+            "github-copilot-sdk is not installed (pip install github-copilot-sdk)"
+        ) from exc
+    return _Sdk(
+        CopilotClient, RuntimeConnection, PermissionHandler, AssistantMessageData, SessionIdleData
+    )
 
 
 def _extract_json_object(text: str) -> str | None:
     """Return the first balanced top-level ``{...}`` in ``text``, or None.
 
-    The CLI may wrap the JSON in prose or markdown fences; this pulls out the
+    The model may wrap the JSON in prose or markdown fences; this pulls out the
     object by brace-matching (string-aware, so braces inside string literals
     don't throw off the depth count).
     """
@@ -73,65 +113,86 @@ def _extract_json_object(text: str) -> str | None:
 
 
 class CopilotBackend(AIBackend):
-    """Reword findings by driving the GitHub Copilot CLI as a subprocess."""
+    """Reword findings by driving the GitHub Copilot SDK over the local CLI."""
 
     def available(self) -> bool:
-        return bool(settings.copilot_github_token and shutil.which(settings.copilot_cli_command))
+        """True when a token, the Copilot CLI, and the SDK are all present.
+
+        Any missing piece means we degrade to the un-reworded findings rather
+        than erroring — the "AI off" path.
+        """
+
+        return bool(
+            settings.copilot_github_token
+            and shutil.which(settings.copilot_cli_command)
+            and importlib.util.find_spec("copilot") is not None
+        )
 
     def annotate(self, system: str, human: str) -> SpecialistAnnotations:
         prompt = f"{system}\n\n{human}\n\n{_JSON_INSTRUCTION}"
-        raw = self._invoke_cli(prompt)
+        raw = self._invoke(prompt)
         payload = _extract_json_object(raw)
         if payload is None:
-            raise CopilotError("Copilot CLI returned no JSON object")
+            raise CopilotError("Copilot SDK returned no JSON object")
         return SpecialistAnnotations.model_validate_json(payload)
 
-    def _invoke_cli(self, prompt: str) -> str:
-        """Run the Copilot CLI once with ``prompt`` and return its stdout.
+    def _invoke(self, prompt: str) -> str:
+        """Run the one-shot SDK round-trip synchronously, returning the reply text.
 
-        The single seam to adapt to the installed CLI. The flags track the
-        current Copilot CLI's programmatic contract:
-
-        * ``-p`` runs the prompt non-interactively and exits.
-        * ``--allow-all-tools`` is *required* for programmatic use — without it
-          the CLI blocks on a per-tool confirmation it can never receive (no
-          TTY) and we'd just hit the timeout. We deliberately do **not** pass
-          ``--allow-all-paths`` / ``--allow-all-urls`` (nor the blanket
-          ``--allow-all``), so filesystem and URL access stay gated.
-        * ``--silent`` drops usage stats so stdout is only the model response.
-
-        Auth is the ``COPILOT_GITHUB_TOKEN`` env var (it outranks ``GH_TOKEN`` /
-        ``GITHUB_TOKEN``); it must be a fine-grained PAT with the "Copilot
-        Requests" permission, or an OAuth token — classic ``ghp_`` tokens are
-        rejected by the CLI.
-
-        Trust note: this drives an *agentic* CLI, a larger surface than the BYOK
-        API call. Prefer BYOK when reviewing untrusted / fork PRs.
+        Wraps the async session in ``asyncio.run`` (the review graph runs
+        synchronously, so there is no live event loop to clash with). Every
+        failure — missing token, SDK/CLI error, timeout — becomes a
+        :class:`CopilotError` so the caller degrades gracefully.
         """
 
-        binary = shutil.which(settings.copilot_cli_command)
-        if binary is None:
-            raise CopilotError(f"Copilot CLI not found on PATH: {settings.copilot_cli_command!r}")
-        if settings.copilot_github_token is None:
-            raise CopilotError("COPILOT_GITHUB_TOKEN is not set")
-        env = {
-            **os.environ,
-            "COPILOT_GITHUB_TOKEN": settings.copilot_github_token.get_secret_value(),
-        }
         try:
-            completed = subprocess.run(
-                [binary, "--allow-all-tools", "--silent", "-p", prompt],
-                capture_output=True,
-                text=True,
-                timeout=settings.copilot_timeout_seconds,
-                check=False,
-                env=env,
-            )
-        except subprocess.TimeoutExpired as exc:
+            return asyncio.run(self._roundtrip(prompt))
+        except CopilotError:
+            raise
+        except TimeoutError as exc:
             raise CopilotError(
-                f"Copilot CLI timed out after {settings.copilot_timeout_seconds}s"
+                f"Copilot SDK timed out after {settings.copilot_timeout_seconds}s"
             ) from exc
-        if completed.returncode != 0:
-            tail = (completed.stderr or completed.stdout or "").strip()[:400]
-            raise CopilotError(f"Copilot CLI exited {completed.returncode}: {tail}")
-        return completed.stdout
+        except Exception as exc:  # any SDK/runtime failure degrades gracefully
+            raise CopilotError(f"Copilot SDK call failed: {exc}") from exc
+
+    async def _roundtrip(self, prompt: str) -> str:
+        """Open a session, send ``prompt``, and collect the assistant's reply.
+
+        The token rides the SDK's ``github_token`` kwarg (never argv); tools are
+        auto-approved (``approve_all``) so the agentic CLI doesn't block on a
+        confirmation it can't receive. ``model`` reuses ``DEFAULT_LLM_MODEL`` —
+        for Copilot it must be a Copilot-catalog id (e.g. ``gpt-5``).
+        """
+
+        sdk = _load_sdk()
+        token = settings.copilot_github_token
+        if token is None:
+            raise CopilotError("COPILOT_GITHUB_TOKEN is not set")
+
+        connection = sdk.RuntimeConnection.for_stdio(
+            path=shutil.which(settings.copilot_cli_command)
+        )
+        chunks: list[str] = []
+        done = asyncio.Event()
+
+        def on_event(event: Any) -> None:
+            data = getattr(event, "data", None)
+            if isinstance(data, sdk.AssistantMessageData):
+                chunks.append(data.content)
+            elif isinstance(data, sdk.SessionIdleData):
+                done.set()
+
+        async with (
+            sdk.CopilotClient(
+                github_token=token.get_secret_value(), connection=connection
+            ) as client,
+            await client.create_session(
+                on_permission_request=sdk.PermissionHandler.approve_all,
+                model=settings.default_llm_model,
+            ) as session,
+        ):
+            session.on(on_event)
+            await session.send(prompt)
+            await asyncio.wait_for(done.wait(), timeout=settings.copilot_timeout_seconds)
+        return "".join(chunks)
