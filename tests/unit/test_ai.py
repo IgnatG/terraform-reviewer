@@ -353,7 +353,10 @@ def test_copilot_passes_token_and_model_via_sdk_not_argv(
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
     monkeypatch.setattr(settings, "copilot_github_token", SecretStr("s3cr3t"))
     monkeypatch.setattr(settings, "default_llm_model", "gpt-5")
-    record = _install_fake_sdk(monkeypatch, response_events=[_FakeIdle()])
+    # A valid reply so annotate completes; this test asserts wiring, not parsing.
+    record = _install_fake_sdk(
+        monkeypatch, response_events=[_FakeAssistantMessage('{"annotations": []}'), _FakeIdle()]
+    )
     CopilotBackend().annotate("sys", "human")
 
     assert record["client_kwargs"]["github_token"] == "s3cr3t"
