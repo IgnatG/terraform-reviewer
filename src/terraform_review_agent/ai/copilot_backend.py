@@ -54,6 +54,8 @@ class _Sdk(NamedTuple):
     RuntimeConnection: Any
     PermissionHandler: Any
     AssistantMessageData: Any
+    AssistantMessageDeltaData: Any
+    SessionErrorData: Any
     SessionIdleData: Any
 
 
@@ -67,13 +69,24 @@ def _load_sdk() -> _Sdk:
     try:
         from copilot import CopilotClient, RuntimeConnection
         from copilot.session import PermissionHandler
-        from copilot.session_events import AssistantMessageData, SessionIdleData
+        from copilot.session_events import (
+            AssistantMessageData,
+            AssistantMessageDeltaData,
+            SessionErrorData,
+            SessionIdleData,
+        )
     except ImportError as exc:  # pragma: no cover - exercised via patched _load_sdk
         raise CopilotError(
             "github-copilot-sdk is not installed (pip install github-copilot-sdk)"
         ) from exc
     return _Sdk(
-        CopilotClient, RuntimeConnection, PermissionHandler, AssistantMessageData, SessionIdleData
+        CopilotClient,
+        RuntimeConnection,
+        PermissionHandler,
+        AssistantMessageData,
+        AssistantMessageDeltaData,
+        SessionErrorData,
+        SessionIdleData,
     )
 
 
@@ -133,7 +146,11 @@ class CopilotBackend(AIBackend):
         raw = self._invoke(prompt)
         payload = _extract_json_object(raw)
         if payload is None:
-            raise CopilotError("Copilot SDK returned no JSON object")
+            # Surface a snippet of the actual reply — for an agentic CLI the most
+            # likely cause is prose/refusal instead of JSON, and this is the only
+            # way to see what came back without a live re-run.
+            snippet = raw.strip()[:400] or "<empty>"
+            raise CopilotError(f"Copilot SDK returned no JSON object (raw reply: {snippet!r})")
         return SpecialistAnnotations.model_validate_json(payload)
 
     def _invoke(self, prompt: str) -> str:
@@ -163,6 +180,13 @@ class CopilotBackend(AIBackend):
         auto-approved (``approve_all``) so the agentic CLI doesn't block on a
         confirmation it can't receive. ``model`` reuses ``DEFAULT_LLM_MODEL`` —
         for Copilot it must be a Copilot-catalog id (e.g. ``gpt-5``).
+
+        Text is gathered from *both* channels: the assistant's text streams as
+        ``AssistantMessageDeltaData`` chunks, while the final
+        ``AssistantMessageData.content`` may or may not be populated — we prefer
+        the completed message and fall back to the joined deltas. A
+        ``SessionErrorData`` (bad model id, auth, model failure) is raised rather
+        than silently yielding an empty reply.
         """
 
         sdk = _load_sdk()
@@ -173,13 +197,20 @@ class CopilotBackend(AIBackend):
         connection = sdk.RuntimeConnection.for_stdio(
             path=shutil.which(settings.copilot_cli_command)
         )
-        chunks: list[str] = []
+        messages: list[str] = []
+        deltas: list[str] = []
+        errors: list[str] = []
         done = asyncio.Event()
 
         def on_event(event: Any) -> None:
             data = getattr(event, "data", None)
-            if isinstance(data, sdk.AssistantMessageData):
-                chunks.append(data.content)
+            if isinstance(data, sdk.AssistantMessageDeltaData):
+                deltas.append(data.delta_content)
+            elif isinstance(data, sdk.AssistantMessageData):
+                messages.append(data.content)
+            elif isinstance(data, sdk.SessionErrorData):
+                errors.append(getattr(data, "message", None) or str(data))
+                done.set()
             elif isinstance(data, sdk.SessionIdleData):
                 done.set()
 
@@ -195,4 +226,7 @@ class CopilotBackend(AIBackend):
             session.on(on_event)
             await session.send(prompt)
             await asyncio.wait_for(done.wait(), timeout=settings.copilot_timeout_seconds)
-        return "".join(chunks)
+
+        if errors:
+            raise CopilotError(f"Copilot session error: {errors[0]}")
+        return "".join(messages).strip() or "".join(deltas)

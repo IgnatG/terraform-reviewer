@@ -166,6 +166,16 @@ class _FakeAssistantMessage:
         self.content = content
 
 
+class _FakeDelta:
+    def __init__(self, delta_content: str) -> None:
+        self.delta_content = delta_content
+
+
+class _FakeSessionError:
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+
 class _FakeIdle:
     pass
 
@@ -229,6 +239,8 @@ def _install_fake_sdk(
         RuntimeConnection=_FakeRuntimeConnection,
         PermissionHandler=_FakePermissionHandler,
         AssistantMessageData=_FakeAssistantMessage,
+        AssistantMessageDeltaData=_FakeDelta,
+        SessionErrorData=_FakeSessionError,
         SessionIdleData=_FakeIdle,
     )
     monkeypatch.setattr(copilot_mod, "_load_sdk", lambda: sdk)
@@ -252,13 +264,46 @@ def test_copilot_annotate_parses_sdk_reply(monkeypatch: pytest.MonkeyPatch) -> N
     assert result.annotations[0].message == "clearer"
 
 
+def test_copilot_annotate_collects_streamed_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The real agentic CLI streams text as delta_content while the final
+    # AssistantMessageData.content can be empty — the reply must still assemble.
+    monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
+    monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
+    _install_fake_sdk(
+        monkeypatch,
+        response_events=[
+            _FakeDelta('{"annotations": [{"id": 2, '),
+            _FakeDelta('"message": "tighten", "suggestion": null}]}'),
+            _FakeAssistantMessage(""),  # empty final message, text only in deltas
+            _FakeIdle(),
+        ],
+    )
+    result = CopilotBackend().annotate("sys", "human")
+    assert result.annotations[0].id == 2
+    assert result.annotations[0].message == "tighten"
+
+
 def test_copilot_annotate_raises_on_no_json(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
     monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
     _install_fake_sdk(
-        monkeypatch, response_events=[_FakeAssistantMessage("no json at all"), _FakeIdle()]
+        monkeypatch,
+        response_events=[_FakeAssistantMessage("I had a look but here's only prose"), _FakeIdle()],
     )
-    with pytest.raises(CopilotError, match="no JSON"):
+    # The error must echo the raw reply so a live failure is diagnosable.
+    with pytest.raises(CopilotError, match=r"no JSON object.*only prose"):
+        CopilotBackend().annotate("sys", "human")
+
+
+def test_copilot_annotate_raises_on_session_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A model/auth failure arrives as SessionErrorData — surface it instead of
+    # silently returning an empty (→ "no JSON") reply.
+    monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
+    monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
+    _install_fake_sdk(
+        monkeypatch, response_events=[_FakeSessionError("unknown model 'gpt-5.4-mini'")]
+    )
+    with pytest.raises(CopilotError, match=r"session error.*unknown model"):
         CopilotBackend().annotate("sys", "human")
 
 
