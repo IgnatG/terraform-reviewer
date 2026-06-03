@@ -53,12 +53,22 @@ for manual rebuilds.
 
 ## Hardening (best practices applied)
 
-- **Pinned actions.** Every `uses:` in our workflows is pinned to a full commit
-  SHA with a `# vX.Y.Z` comment (GitHub's
-  [security hardening](https://docs.github.com/en/actions/security-for-github-actions/security-guiding-principles/security-hardening-for-github-actions)
-  guidance — and what our own A2 lens checks). **Dependabot** (`.github/dependabot.yml`,
-  `github-actions` + `docker` weekly) bumps those SHAs as `deps:` commits, so a
-  pin update cuts a patch release automatically.
+- **Major-tag action pins.** Every `uses:` in our workflows pins a **major tag**
+  (`actions/checkout@v6`, `docker/build-push-action@v7`, …). A major tag already
+  floats across its own minor/patch releases and only jumps on a breaking major,
+  which is the maintenance/safety trade-off we want here. (Full SHA pins are
+  GitHub's strictest [hardening](https://docs.github.com/en/actions/security-for-github-actions/security-guiding-principles/security-hardening-for-github-actions)
+  option and what our own A2 lens prefers — we accept the looser major-tag pin
+  deliberately; revisit if supply-chain risk tolerance changes.)
+- **Dependabot, major-only for actions** (`.github/dependabot.yml`). Three
+  ecosystems, all weekly, all `deps:`-prefixed (so a bump cuts a patch release):
+  `github-actions` **ignores minor + patch** (a major tag already covers those —
+  only a new major opens a PR), `docker` (base-image security patches), and `uv`
+  (Python deps in `uv.lock`).
+- **Job hardening.** Workflows set top-level least-privilege `permissions`,
+  `concurrency` groups (release-please serialises on `main` without cancelling
+  in-flight; the others cancel superseded runs), and `timeout-minutes` so a hung
+  job can't run to the 6-hour default.
 - **Tag protection (do this in the UI).** Protect the *exact* release tags so
   they're immutable, while leaving the floats movable:
   **Settings → Rules → Rulesets → New tag ruleset** → target tags matching
@@ -72,7 +82,12 @@ for manual rebuilds.
 The default `GITHUB_TOKEN` has two limits here: PRs it opens **don't trigger CI**,
 and it **can't write to `.github/workflows/`** (so it can't bump an exact image
 pin — that's why the workflow uses the `:v1` float). A Personal Access Token
-fixes both. To enable it:
+fixes both.
+
+**This is now configured:** `release-please.yml` reads `token: ${{ secrets.RELEASE_PAT }}`,
+so as long as the `RELEASE_PAT` secret exists the release PR runs CI and opens
+without the org/repo "Allow GitHub Actions to create and approve pull requests"
+toggle. For reference, the secret was set up as:
 
 1. **Create the PAT.** GitHub → your **Settings** (not the repo) →
    *Developer settings*:
@@ -80,19 +95,15 @@ fixes both. To enable it:
      Generate*. Scope it to the **`IgnatG/terraform-reviewer`** repo with
      **Repository permissions**: *Contents: Read and write*, *Pull requests: Read
      and write*, *Workflows: Read and write*. Set an expiry + a calendar reminder
-     to rotate it.
+     to rotate it (a fine-grained PAT expires — when it lapses, releases stop
+     until you regenerate it and update the secret).
    - **Classic** (simpler): *Tokens (classic) → Generate* with the **`repo`** and
      **`workflow`** scopes.
 2. **Add it as a repo secret.** Repo → *Settings → Secrets and variables →
    Actions → New repository secret* → name **`RELEASE_PAT`**, paste the token.
-3. **Use it in the workflow.** On the `release-please-action` step in
-   `.github/workflows/release-please.yml`, add a `token:` under `with:`:
-
-   ```yaml
-       with:
-         target-branch: main
-         token: ${{ secrets.RELEASE_PAT }}
-   ```
+3. **Already wired in.** `.github/workflows/release-please.yml` passes
+   `token: ${{ secrets.RELEASE_PAT }}` on the `release-please-action` step. (If you
+   ever remove the PAT, drop that line and enable the repo toggle instead.)
 
 4. **(Only if you want the exact image pinned per release.)** Put the workflow
    back under `extra-files` in `release-please-config.json`:

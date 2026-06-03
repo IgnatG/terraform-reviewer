@@ -101,6 +101,9 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
+    # Cap a hung LLM/scanner call instead of letting it run to the 6h default —
+    # this burns the *consumer's* Actions minutes, so keep it tight.
+    timeout-minutes: 20
 
     permissions:
       contents: read
@@ -157,7 +160,7 @@ jobs:
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
 
       - name: Checkout the PR merge ref (full history for infracost base diff)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@v6
         with:
           # Review the PR by number, never the triggering ref — otherwise a
           # workflow_dispatch rerun would scan the selected branch (e.g. main)

@@ -25,9 +25,17 @@ permissions:
   contents: write
   pull-requests: write
 
+# Serialise release runs on main — two quick pushes shouldn't race two release
+# PRs. Don't cancel in-progress: a half-finished release (tag pushed, image not)
+# is worse than waiting.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
@@ -35,12 +43,16 @@ jobs:
       minor: ${{ steps.rp.outputs.minor }}
       version: ${{ steps.rp.outputs.version }}
     steps:
-      # Default GITHUB_TOKEN is fine; the chained jobs below run in THIS workflow
-      # run, so they fire even though the created tag can't trigger a fresh run.
-      # For CI to run on the release PR, set `token: ${{ secrets.RELEASE_PAT }}`.
+      # RELEASE_PAT (a PAT with contents + pull-requests scope) makes the release
+      # PR run CI AND lets release-please open the PR without the org/repo
+      # "Allow GitHub Actions to create and approve pull requests" toggle. The
+      # chained jobs below run in THIS run regardless (a token-created tag can't
+      # trigger a fresh workflow). If the PAT is ever removed, drop the `token:`
+      # line and flip that repo toggle instead.
       - uses: googleapis/release-please-action@v5
         id: rp
         with:
+          token: ${{ secrets.RELEASE_PAT }}
           target-branch: main
         # config-file + manifest-file default to release-please-config.json and
         # .release-please-manifest.json, which we ship at the repo root.
@@ -49,6 +61,7 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:

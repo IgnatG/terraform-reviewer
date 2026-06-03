@@ -1,24 +1,44 @@
 version: 2
 
-# Keeps the SHA-pinned GitHub Actions current (and the Dockerfile base images).
-# Without this, pinning to a commit SHA freezes the action forever; Dependabot
-# opens PRs that bump the SHA and update the trailing `# vX.Y.Z` comment.
 updates:
+  # GitHub Actions are pinned to major tags (e.g. actions/checkout@v6). We only
+  # want PRs when a NEW MAJOR ships (v6 → v7) — a major tag already floats across
+  # its own minor/patch releases, so a v6 → v6.0.3 PR is pure noise. The `ignore`
+  # block below drops minor + patch, leaving major-only bumps.
   - package-ecosystem: github-actions
     # Covers every workflow under .github/workflows/.
     directory: "/"
     schedule:
       interval: weekly
     commit-message:
-      # `deps:` is a releasable unit here, so an action bump cuts a patch release.
+      # `deps:` is a releasable unit here, so a major action bump cuts a patch release.
       prefix: deps
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
 
+  # Dockerfile base image (python:3.13-slim). Keep security patches flowing — no
+  # major-only filter here, so a patched base image still opens a PR.
   - package-ecosystem: docker
     directory: "/"
     schedule:
       interval: weekly
     commit-message:
       prefix: deps
+
+  # Python dependencies (uv.lock). Without this the lockfile drifts and security
+  # fixes never land. Grouped into one weekly PR; `deps:` so a bump cuts a patch.
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    groups:
+      python:
+        patterns: ["*"]
