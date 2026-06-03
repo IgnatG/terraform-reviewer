@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.1](https://github.com/IgnatG/terraform-reviewer/compare/v1.2.0...v1.2.1) (2026-06-03)
+
+
+### Documentation
+
+* **readme:** :sparkles: enhance configuration options for inline comments and scan modes ([de6627b](https://github.com/IgnatG/terraform-reviewer/commit/de6627bf75d458ed62572a11f50c7ab8a88a0b7d))
+
+
+### Miscellaneous
+
+* :fire: remove GDS readiness lens and related components ([ea75fd1](https://github.com/IgnatG/terraform-reviewer/commit/ea75fd16ed88ad872d2b5c30e54ba83233d21550))
+
 ## [1.2.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.1.0...v1.2.0) (2026-06-03)
 
 
