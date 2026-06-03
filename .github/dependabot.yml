@@ -22,14 +22,23 @@ updates:
           - version-update:semver-minor
           - version-update:semver-patch
 
-  # Dockerfile base image (python:3.13-slim). Keep security patches flowing — no
-  # major-only filter here, so a patched base image still opens a PR.
+  # Dockerfile base image (python:3.14-slim). The project is pinned to Python
+  # 3.14 (.python-version, requires-python <3.15, Dockerfile UV_PYTHON=
+  # python3.14 + UV_PYTHON_DOWNLOADS=never), so a 3.15 base would break `uv sync`
+  # ("no 3.14 interpreter"). The `3.14-slim` tag already floats to the latest
+  # 3.14.x patch at build time, so block the Python minor/major bump here — bump
+  # to the next Python minor deliberately (it's a coordinated multi-file change).
   - package-ecosystem: docker
     directory: "/"
     schedule:
       interval: weekly
     commit-message:
       prefix: deps
+    ignore:
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
 
   # Python dependencies (uv.lock). Without this the lockfile drifts and security
   # fixes never land. Grouped into one weekly PR; `deps:` so a bump cuts a patch.

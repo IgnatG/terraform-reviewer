@@ -7,7 +7,7 @@ MYPY    := ./.venv/bin/mypy
 PYTEST  := ./.venv/bin/pytest
 
 venv:
-	python3.13 -m venv .venv
+	python3.14 -m venv .venv
 	$(PIP) install --upgrade pip uv
 
 install: venv

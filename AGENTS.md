@@ -15,7 +15,7 @@
 
 ## 2. Stack (fixed — do not change without explicit instruction)
 
-- **Python 3.13** · **uv** package manager · **`.venv` only** (never system Python)
+- **Python 3.14** · **uv** package manager · **`.venv` only** (never system Python)
 - **Pydantic v2** for all state, tool I/O, and config schemas
 - **LangGraph** or **LangChain**
 - **SQLite** checkpointer (`langgraph-checkpoint-sqlite`) if keeping state is required
@@ -61,7 +61,7 @@ All importable code lives under `src/terraform_review_agent/`. `agent.py` expose
 ## 4. Setup & hard rules
 
 ```bash
-python3.13 -m venv .venv && source .venv/bin/activate
+python3.14 -m venv .venv && source .venv/bin/activate
 pip install uv
 uv sync --inexact --extra dev   # exact versions from uv.lock (--inexact keeps uv/pip)
 cp .env.example .env            # fill in keys
@@ -169,7 +169,7 @@ ENVIRONMENT=development               # development | staging | production
 
 ## 7. Docker
 
-- Base: `python:3.13-slim`, `.venv` at `/app/.venv` (identical to host), non-root user
+- Base: `python:3.14-slim`, `.venv` at `/app/.venv` (identical to host), non-root user
 - Compose: mount `./data` (SQLite persists across restarts) and `./src` (dev hot-reload — remove for prod)
 - Run via `docker compose up`
 
@@ -190,7 +190,7 @@ Python targets invoke `./.venv/bin/...` — never bare `python`. `run` is the ex
   "dependencies": ["."],
   "graphs": { "agent": "./src/terraform_review_agent/agent.py:agent" },
   "env": "./.env",
-  "python_version": "3.13"
+  "python_version": "3.14"
 }
 ```
 

@@ -1,5 +1,5 @@
 # terraform review
-![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?logo=langchain&logoColor=white)
 ![Pydantic v2](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
@@ -210,7 +210,7 @@ rebuild-image PR in this repo, not an edit to your workflow file.
 
 ## Local development
 
-Requires Python 3.13 + [uv](https://docs.astral.sh/uv/). Scanners only run
+Requires Python 3.14 + [uv](https://docs.astral.sh/uv/). Scanners only run
 inside the container; the host test suite mocks them.
 
 ```bash

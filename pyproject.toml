@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "terraform-review-agent"
 version = "1.1.0"
 description = "LangGraph multi-agent reviewer for Terraform pull requests."
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14,<3.15"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "ignatg" }]
 dependencies = [
@@ -45,6 +45,10 @@ packages = ["src/terraform_review_agent"]
 
 [tool.ruff]
 line-length = 100
+# Style floor stays at py313 even though we run on 3.14: targeting py314 makes the
+# formatter rewrite `except (A, B):` to PEP 758's paren-free `except A, B:`, which
+# reads like the removed Py2 `except E, name:` syntax. Conservative is clearer; the
+# code runs unchanged on 3.14. (mypy's python_version tracks the real 3.14 runtime.)
 target-version = "py313"
 src = ["src", "tests"]
 
@@ -55,7 +59,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 "tests/*" = ["B011"]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 strict = true
 files = ["src"]
 plugins = ["pydantic.mypy"]

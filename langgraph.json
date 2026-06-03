@@ -4,5 +4,5 @@
     "agent": "./src/terraform_review_agent/agent.py:agent"
   },
   "env": "./.env",
-  "python_version": "3.13"
+  "python_version": "3.14"
 }
