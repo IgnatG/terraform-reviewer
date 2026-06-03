@@ -8,8 +8,9 @@ name: terraform-review
 # input) and checks out that PR's merge ref, so a workflow_dispatch rerun reviews
 # the PR rather than whatever branch was selected for the manual run.
 #
-# The image bundles terraform/tfsec/tflint/infracost + checkov, so there are no
-# per-run scanner installs. Scanner versions are pinned in the image, not here.
+# The image bundles terraform/tfsec/tflint/infracost/checkov + trivy, so there
+# are no per-run scanner installs. Scanner versions are pinned in the image, not
+# here.
 
 on:
   workflow_call:
@@ -66,6 +67,14 @@ on:
           line (on by default). Findings off the diff stay in the sticky summary.
         type: boolean
         default: true
+      tflint-init:
+        description: >-
+          Run `tflint --init` when the repo has a `.tflint.hcl`. OFF by default:
+          `--init` downloads and EXECUTES the plugins that file declares, so a
+          malicious PR could run arbitrary code. Enable only if you trust the
+          repo's `.tflint.hcl`. With it off, tflint's built-in rules still run.
+        type: boolean
+        default: false
       terraform-standard:
         description: >-
           A1 Terraform Standardiser: "default" for the built-in house standard,
@@ -161,6 +170,7 @@ jobs:
       FAIL_ON_AI_ERROR: ${{ inputs.fail-on-ai-error }}
       SCAN_MODE: ${{ inputs.scan-mode }}
       INLINE_COMMENTS: ${{ inputs.inline-comments }}
+      TFLINT_INIT: ${{ inputs.tflint-init }}
       # Wedge lenses (Phase 5) — off unless the caller names a definition.
       TERRAFORM_STANDARD: ${{ inputs.terraform-standard }}
       CICD_STANDARD: ${{ inputs.cicd-standard }}

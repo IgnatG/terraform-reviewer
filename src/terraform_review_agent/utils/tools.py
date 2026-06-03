@@ -54,6 +54,15 @@ class ScannerError(RuntimeError):
     """Raised when a scanner binary is missing or fails unrecoverably."""
 
 
+class ScannerNotConfigured(ScannerError):
+    """Raised when an *optional* check source was simply not enabled.
+
+    Distinct from a real :class:`ScannerError` (missing binary, parse failure):
+    this means "the caller didn't opt into this source", which is normal — so the
+    runner logs it at info, not warning, and it never reads as an error.
+    """
+
+
 # ---------------------------------------------------------------------------
 # shared helpers
 # ---------------------------------------------------------------------------
@@ -296,16 +305,18 @@ def _parse_tflint(payload: dict[str, Any], working_dir: Path) -> list[Finding]:
 def run_tflint(working_dir: str) -> list[Finding]:
     """Run tflint under ``working_dir`` and return normalized style findings.
 
-    When the workspace ships a ``.tflint.hcl``, ``tflint --init`` is run first so
-    any plugins it declares (e.g. the aws/google/azurerm rulesets) are installed;
-    without it tflint errors on the plugin block and the repo loses plugin-rule
-    coverage. ``GITHUB_TOKEN`` (set in CI) raises the plugin download rate limit.
+    ``tflint --init`` (which downloads + executes the plugins a ``.tflint.hcl``
+    declares) is run only when ``settings.tflint_init`` is enabled — it is OFF by
+    default because a malicious PR could point that file at an attacker-controlled
+    plugin and achieve code execution. With it off, tflint runs its built-in rules;
+    if a plugin block then makes tflint error, the run is skipped cleanly.
+    ``GITHUB_TOKEN`` (set in CI) raises the plugin download rate limit.
     tflint exits non-zero (1/2) when issues are found, treated as a successful run.
     """
 
     binary = _which_or_raise("tflint")
     cwd = Path(working_dir)
-    if (cwd / ".tflint.hcl").is_file():
+    if settings.tflint_init and (cwd / ".tflint.hcl").is_file():
         _run([binary, "--init"], cwd=cwd)
     completed = _run(
         [binary, "--format=json", "--recursive"],
@@ -594,11 +605,14 @@ def build_infracost_baseline(
 # ---------------------------------------------------------------------------
 # external check sources (SARIF ingestion) — Phase 3
 #
-# These tools (MegaLinter, Prowler-IaC, gitleaks, Trivy) run as their own CI
-# steps and emit aggregated SARIF; the engine ingests the report rather than
-# shelling out to a (often Docker-only) tool in-process. Each runner skips with
-# a ScannerError when its report path is unset, so the source is inert until a
-# report is supplied — `collect()` swallows that and continues.
+# Trivy is bundled in the image and runs directly over the workspace; it also
+# accepts a pre-built SARIF report (TRIVY_SARIF_PATH) from an earlier CI step,
+# which takes precedence. MegaLinter and Prowler-IaC stay ingest-only: MegaLinter
+# overlaps tflint/checkov and is a heavy Docker action, and Prowler audits *live
+# cloud accounts*, not Terraform files. Secret scanning (gitleaks) is
+# deliberately omitted — it surfaces credential values as findings, which would
+# then be fed to the LLM rewording step. Each runner raises ScannerNotConfigured
+# when it has nothing to do, which `collect()` logs at info.
 # ---------------------------------------------------------------------------
 
 
@@ -626,32 +640,41 @@ def run_prowler_iac(working_dir: str) -> list[Finding]:
     """Ingest a Prowler-IaC SARIF report (``PROWLER_SARIF_PATH``) as security findings."""
 
     if not settings.prowler_sarif_path:
-        raise ScannerError("prowler: PROWLER_SARIF_PATH not set")
+        raise ScannerNotConfigured("prowler: PROWLER_SARIF_PATH not set")
     return _ingest_sarif_report(
         settings.prowler_sarif_path, Path(working_dir), source="prowler", category="security"
     )
 
 
 @tool
-def run_gitleaks(working_dir: str) -> list[Finding]:
-    """Ingest a gitleaks SARIF report (``GITLEAKS_SARIF_PATH``) as security findings."""
-
-    if not settings.gitleaks_sarif_path:
-        raise ScannerError("gitleaks: GITLEAKS_SARIF_PATH not set")
-    return _ingest_sarif_report(
-        settings.gitleaks_sarif_path, Path(working_dir), source="gitleaks", category="security"
-    )
-
-
-@tool
 def run_trivy(working_dir: str) -> list[Finding]:
-    """Ingest a Trivy SARIF report (``TRIVY_SARIF_PATH``) as security findings."""
+    """Scan the workspace for IaC misconfigurations (Trivy), as security findings.
 
-    if not settings.trivy_sarif_path:
-        raise ScannerError("trivy: TRIVY_SARIF_PATH not set")
-    return _ingest_sarif_report(
-        settings.trivy_sarif_path, Path(working_dir), source="trivy", category="security"
+    Dual mode: when ``TRIVY_SARIF_PATH`` is set, ingest that report; otherwise run
+    the bundled ``trivy config`` over the workspace. Skips
+    (``ScannerNotConfigured``) only when neither a report nor the binary exists.
+    """
+
+    if settings.trivy_sarif_path:
+        return _ingest_sarif_report(
+            settings.trivy_sarif_path, Path(working_dir), source="trivy", category="security"
+        )
+    binary = shutil.which("trivy")
+    if binary is None:
+        raise ScannerNotConfigured("trivy: TRIVY_SARIF_PATH not set and trivy binary not on PATH")
+    cwd = Path(working_dir)
+    completed = _run(
+        [binary, "config", "--format", "sarif", "--quiet", str(cwd)],
+        cwd=cwd,
+        ok_exit_codes=(0,),
     )
+    if not completed.stdout.strip():
+        return []
+    try:
+        data: dict[str, Any] = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise ScannerError(f"trivy produced invalid JSON: {exc}") from exc
+    return parse_sarif(data, cwd, category="security")
 
 
 @tool
@@ -664,7 +687,7 @@ def run_megalinter(working_dir: str) -> list[Finding]:
     """
 
     if not settings.megalinter_sarif_path:
-        raise ScannerError("megalinter: MEGALINTER_SARIF_PATH not set")
+        raise ScannerNotConfigured("megalinter: MEGALINTER_SARIF_PATH not set")
     return _ingest_sarif_report(
         settings.megalinter_sarif_path, Path(working_dir), source="megalinter", category="style"
     )
@@ -702,6 +725,18 @@ def _truncate_to_bytes(text: str, cap_bytes: int) -> tuple[str, bool]:
 # and Terraform's provider/module download cache (huge, machine-generated).
 _WHOLE_REPO_SKIP_DIRS = frozenset({".git", ".terraform"})
 
+# Terraform variable files (.tfvars / .tfvars.json) routinely hold secret values
+# (passwords, tokens, keys). Their *contents* are never sent to the LLM — the
+# scanners still read them from disk, so detection is unaffected; this only keeps
+# raw secrets out of the prompt payloads.
+_LLM_SECRET_PRONE_SUFFIXES = (".tfvars", ".tfvars.json")
+
+
+def _is_llm_payload_eligible(path: str) -> bool:
+    """True if a Terraform file's contents may be sent to the LLM (not a tfvars file)."""
+
+    return not path.endswith(_LLM_SECRET_PRONE_SUFFIXES)
+
 
 def _iter_repo_terraform_files(base: Path) -> list[Path]:
     """Every Terraform file under ``base`` (sorted), skipping VCS/cache dirs."""
@@ -733,6 +768,9 @@ def _whole_repo_payloads(
     total_bytes = 0
     dropped = 0
     for path in _iter_repo_terraform_files(base):
+        # .tfvars hold secrets — scanned from disk, never sent to the LLM.
+        if not _is_llm_payload_eligible(path.name):
+            continue
         raw = path.read_text(encoding="utf-8", errors="replace")
         content, truncated = _truncate_to_bytes(raw, per_file_cap_bytes)
         size = len(content.encode("utf-8"))
@@ -763,6 +801,10 @@ def prepare_file_payloads(
 ) -> list[FilePayload]:
     """Return per-file LLM payloads with size caps + diff-only fallback applied.
 
+    ``.tfvars``/``.tfvars.json`` are always excluded — they routinely hold
+    secrets, and these payloads are what reaches the LLM. The scanners read those
+    files straight from disk, so excluding them here doesn't lose any detection.
+
     When ``whole_repo`` is set (the PR-label whole-codebase review), every
     Terraform file under ``working_dir`` is loaded — not just the PR's changed
     files — capped to ``total_threshold_bytes`` total, with dropped files logged.
@@ -783,7 +825,15 @@ def prepare_file_payloads(
     base = Path(working_dir)
     if whole_repo:
         return _whole_repo_payloads(base, per_file_cap_bytes, total_threshold_bytes)
-    candidates: list[ChangedFile] = [f for f in pr.changed_files if f.is_terraform]
+    # .tfvars/.tfvars.json are excluded from the payloads (they hold secrets); the
+    # scanners still read them from disk, so their findings are unaffected.
+    candidates: list[ChangedFile] = [
+        f
+        for f in pr.changed_files
+        if f.is_terraform
+        and _is_llm_payload_eligible(f.path)
+        and _is_llm_payload_eligible(f.previous_path or "")
+    ]
 
     full_payloads: list[FilePayload] = []
     total_bytes = 0

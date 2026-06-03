@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from terraform_review_agent.utils.state import (
 )
 from terraform_review_agent.utils.tools import (
     ScannerError,
-    run_gitleaks,
+    ScannerNotConfigured,
     run_megalinter,
     run_prowler_iac,
 )
@@ -85,15 +86,21 @@ def _no_llm(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_runner_skips_when_report_path_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An unset path is "not opted in", not a failure — it raises the
+    # ScannerNotConfigured subclass so the runner can log it at info, not warning.
     monkeypatch.setattr(settings, "prowler_sarif_path", None)
-    with pytest.raises(ScannerError, match="PROWLER_SARIF_PATH not set"):
+    with pytest.raises(ScannerNotConfigured, match="PROWLER_SARIF_PATH not set"):
         run_prowler_iac.invoke({"working_dir": "."})
 
 
 def test_runner_raises_when_report_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(settings, "gitleaks_sarif_path", str(tmp_path / "nope.sarif"))
-    with pytest.raises(ScannerError, match="not found"):
-        run_gitleaks.invoke({"working_dir": str(tmp_path)})
+    # A path that IS set but points nowhere is a real problem (a plain
+    # ScannerError, not the not-configured subclass) — worth a warning.
+    monkeypatch.setattr(settings, "trivy_sarif_path", str(tmp_path / "nope.sarif"))
+    with pytest.raises(ScannerError) as exc_info:
+        tools.run_trivy.invoke({"working_dir": str(tmp_path)})
+    assert "not found" in str(exc_info.value)
+    assert not isinstance(exc_info.value, ScannerNotConfigured)
 
 
 def test_runner_raises_on_invalid_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -102,6 +109,35 @@ def test_runner_raises_on_invalid_json(monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setattr(settings, "trivy_sarif_path", str(bad))
     with pytest.raises(ScannerError, match="invalid SARIF JSON"):
         tools.run_trivy.invoke({"working_dir": str(tmp_path)})
+
+
+def test_trivy_runs_bundled_binary_when_no_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # No TRIVY_SARIF_PATH but the bundled binary is present → run `trivy config`
+    # directly and parse its SARIF stdout (the new bundled behaviour).
+    monkeypatch.setattr(settings, "trivy_sarif_path", None)
+    monkeypatch.setattr(tools.shutil, "which", lambda _n: "/usr/local/bin/trivy")
+    captured: dict[str, Any] = {}
+
+    def fake_run(cmd: list[str], **_kw: Any) -> subprocess.CompletedProcess[str]:
+        captured["cmd"] = cmd
+        sarif = _sarif("Trivy", "main.tf", rule="AVD-AWS-0089")
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(sarif), stderr="")
+
+    monkeypatch.setattr(tools.subprocess, "run", fake_run)
+
+    findings = tools.run_trivy.invoke({"working_dir": str(tmp_path)})
+
+    assert [f.rule for f in findings] == ["trivy:AVD-AWS-0089"]
+    assert captured["cmd"][1] == "config" and "sarif" in captured["cmd"]
+
+
+def test_trivy_skips_when_no_report_and_no_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "trivy_sarif_path", None)
+    monkeypatch.setattr(tools.shutil, "which", lambda _n: None)
+    with pytest.raises(ScannerNotConfigured, match="trivy"):
+        tools.run_trivy.invoke({"working_dir": "."})
 
 
 def test_prowler_runner_ingests_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -131,39 +167,41 @@ def test_megalinter_runner_is_style(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 # ---------------------------------------------------------------------------
 
 
-def test_security_lens_ingests_gitleaks_scoped_to_changed_files(
+def test_security_lens_scopes_ingested_source_to_changed_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # Isolate the source: in-image + other external scanners report nothing.
+    # Isolate one source (an ingested Trivy report); the rest report nothing.
+    # The security lens scopes findings to ALL changed files (not just .tf), so a
+    # finding in a changed non-.tf file is kept and an unchanged-file one dropped.
     monkeypatch.setattr(settings, "scan_mode", "diff")  # this test asserts diff-scoping
-    for name in ("run_tfsec", "run_checkov", "run_prowler_iac", "run_trivy"):
+    for name in ("run_tfsec", "run_checkov", "run_prowler_iac"):
         monkeypatch.setattr(security_mod, name, _Empty())
     _no_llm(monkeypatch)
 
-    report = tmp_path / "gitleaks.sarif"
+    report = tmp_path / "trivy.sarif"
     report.write_text(
         json.dumps(
             {
                 "runs": [
                     {
-                        "tool": {"driver": {"name": "gitleaks"}},
+                        "tool": {"driver": {"name": "Trivy"}},
                         "results": [
                             {  # in a changed non-.tf file -> kept (changed_paths widening)
-                                "ruleId": "aws-key",
+                                "ruleId": "AVD-AWS-0001",
                                 "level": "error",
-                                "message": {"text": "AWS key in app.py"},
+                                "message": {"text": "misconfig in app.yaml"},
                                 "locations": [
-                                    {"physicalLocation": {"artifactLocation": {"uri": "app.py"}}}
+                                    {"physicalLocation": {"artifactLocation": {"uri": "app.yaml"}}}
                                 ],
                             },
                             {  # in an unchanged file -> filtered out
-                                "ruleId": "aws-key",
+                                "ruleId": "AVD-AWS-0001",
                                 "level": "error",
-                                "message": {"text": "leak in untouched file"},
+                                "message": {"text": "misconfig in untouched file"},
                                 "locations": [
                                     {
                                         "physicalLocation": {
-                                            "artifactLocation": {"uri": "legacy/old.py"}
+                                            "artifactLocation": {"uri": "legacy/old.yaml"}
                                         }
                                     }
                                 ],
@@ -174,17 +212,17 @@ def test_security_lens_ingests_gitleaks_scoped_to_changed_files(
             }
         )
     )
-    monkeypatch.setattr(settings, "gitleaks_sarif_path", str(report))
+    monkeypatch.setattr(settings, "trivy_sarif_path", str(report))
 
-    # PR changes a .tf (so the lens applies) plus app.py (where the leak is).
+    # PR changes a .tf (so the lens applies) plus app.yaml (where the finding is).
     state = ReviewState(
-        pr=_pr([ChangedFile(path="main.tf"), ChangedFile(path="app.py")]),
+        pr=_pr([ChangedFile(path="main.tf"), ChangedFile(path="app.yaml")]),
         workspace=str(tmp_path),
     )
 
     out = SecurityLens().run(state)
 
-    assert [(f.rule, f.file) for f in out.findings] == [("gitleaks:aws-key", "app.py")]
+    assert [(f.rule, f.file) for f in out.findings] == [("trivy:AVD-AWS-0001", "app.yaml")]
     assert out.findings[0].agent == "security"
 
 

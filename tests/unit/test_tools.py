@@ -384,13 +384,30 @@ def _record_subprocess(monkeypatch: pytest.MonkeyPatch, *, binary_path: str) -> 
     return calls
 
 
-def test_run_tflint_initializes_plugins_when_config_present(
+def test_run_tflint_skips_init_by_default_even_with_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Regression: a repo with .tflint.hcl declares plugins that need
-    `tflint --init`. Without it, tflint errors on the plugin block and the
-    repo silently loses plugin-rule style coverage."""
+    """Security: a .tflint.hcl from an (untrusted) PR must NOT trigger
+    `tflint --init` by default — `--init` downloads + executes that file's
+    plugins (arbitrary code execution). The scan still runs with built-in rules."""
 
+    monkeypatch.setattr(tools.settings, "tflint_init", False)
+    (tmp_path / ".tflint.hcl").write_text('plugin "aws" {\n  enabled = true\n}\n')
+    calls = _record_subprocess(monkeypatch, binary_path="/usr/bin/tflint")
+
+    run_tflint.invoke({"working_dir": str(tmp_path)})
+
+    assert not any("--init" in c for c in calls)
+    assert any("--recursive" in c for c in calls)  # the scan still runs
+
+
+def test_run_tflint_initializes_plugins_when_opted_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With tflint_init opted in (trusted repo), a .tflint.hcl triggers
+    `tflint --init` before the scan so its plugin rules are available."""
+
+    monkeypatch.setattr(tools.settings, "tflint_init", True)
     (tmp_path / ".tflint.hcl").write_text('plugin "aws" {\n  enabled = true\n}\n')
     calls = _record_subprocess(monkeypatch, binary_path="/usr/bin/tflint")
 
@@ -840,6 +857,33 @@ def test_prepare_file_payloads_whole_repo_caps_total_and_keeps_at_least_one(
     )
 
     assert 0 < len(payloads) < 20
+
+
+def test_prepare_file_payloads_excludes_tfvars_from_changed_files(tmp_path: Path) -> None:
+    # .tfvars hold secrets and must never reach the LLM payloads. .tf is sent.
+    (tmp_path / "main.tf").write_text('resource "x" "y" {}\n')
+    (tmp_path / "secrets.tfvars").write_text('db_password = "hunter2"\n')
+    (tmp_path / "prod.tfvars.json").write_text('{"token": "abc"}\n')
+    pr = _pr(
+        [
+            ChangedFile(path="main.tf"),
+            ChangedFile(path="secrets.tfvars"),
+            ChangedFile(path="prod.tfvars.json"),
+        ]
+    )
+
+    payloads = prepare_file_payloads(pr, tmp_path)
+
+    assert [p.path for p in payloads] == ["main.tf"]
+
+
+def test_prepare_file_payloads_whole_repo_excludes_tfvars(tmp_path: Path) -> None:
+    (tmp_path / "main.tf").write_text('resource "x" "y" {}\n')
+    (tmp_path / "secrets.tfvars").write_text('db_password = "hunter2"\n')
+
+    payloads = prepare_file_payloads(_pr([]), tmp_path, whole_repo=True)
+
+    assert [p.path for p in payloads] == ["main.tf"]
 
 
 # ---------------------------------------------------------------------------

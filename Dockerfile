@@ -15,6 +15,7 @@ ARG TERRAFORM_VERSION=1.15.3
 ARG TFSEC_VERSION=1.28.14
 ARG TFLINT_VERSION=0.62.1
 ARG INFRACOST_VERSION=0.10.44
+ARG TRIVY_VERSION=0.71.0
 
 # ---------------------------------------------------------------------------
 # Stage 1 — fetch pinned scanner binaries (arch-aware via buildx TARGETARCH)
@@ -25,8 +26,10 @@ ARG TERRAFORM_VERSION
 ARG TFSEC_VERSION
 ARG TFLINT_VERSION
 ARG INFRACOST_VERSION
-# TARGETARCH is auto-populated by buildx ("amd64" / "arm64"); matches every
-# upstream asset naming below.
+ARG TRIVY_VERSION
+# TARGETARCH is auto-populated by buildx ("amd64" / "arm64"); matches the
+# terraform/tfsec/tflint/infracost asset naming directly. trivy uses its own arch
+# labels, mapped below.
 ARG TARGETARCH
 
 RUN apt-get update \
@@ -56,6 +59,17 @@ RUN curl -fsSL -o infracost.tar.gz \
       "https://github.com/infracost/infracost/releases/download/v${INFRACOST_VERSION}/infracost-linux-${TARGETARCH}.tar.gz" \
     && tar -xzf infracost.tar.gz \
     && mv "infracost-linux-${TARGETARCH}" /out/infracost
+
+# trivy (IaC misconfiguration scanning). Asset arch is 64bit/ARM64.
+RUN case "${TARGETARCH}" in \
+      amd64) TV_ARCH=64bit ;; \
+      arm64) TV_ARCH=ARM64 ;; \
+      *) echo "unsupported TARGETARCH for trivy: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o trivy.tar.gz \
+      "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TV_ARCH}.tar.gz" \
+    && tar -xzf trivy.tar.gz trivy \
+    && mv trivy /out/trivy
 
 # Fail the build immediately if any downloaded binary can't execute on the
 # target arch (catches wrong-arch / truncated / corrupt downloads here, before

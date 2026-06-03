@@ -20,6 +20,7 @@ import pytest
 from pydantic import SecretStr
 
 from terraform_review_agent.config import settings
+from terraform_review_agent.utils import prompts as prompts_mod
 from terraform_review_agent.utils.lenses import _annotate
 from terraform_review_agent.utils.lenses import cost as cost_mod
 from terraform_review_agent.utils.lenses import security as security_mod
@@ -38,7 +39,7 @@ from terraform_review_agent.utils.state import (
     ReviewState,
     SpecialistAnnotations,
 )
-from terraform_review_agent.utils.tools import FilePayload, ScannerError
+from terraform_review_agent.utils.tools import FilePayload, ScannerError, ScannerNotConfigured
 
 # ---------------------------------------------------------------------------
 # fakes
@@ -972,8 +973,49 @@ def test_security_lens_propagates_ai_error(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 # ---------------------------------------------------------------------------
+# collect(): not-configured skip vs real failure log level
+# ---------------------------------------------------------------------------
+
+
+def test_collect_logs_not_configured_at_info_and_failure_at_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An unconfigured optional source must NOT read as a warning (the user just
+    # didn't opt in); a real scanner failure still warns.
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(_annotate.log, "info", lambda event, **kw: events.append(("info", event)))
+    monkeypatch.setattr(
+        _annotate.log, "warning", lambda event, **kw: events.append(("warning", event))
+    )
+
+    not_configured = _FakeTool(ScannerNotConfigured("trivy: TRIVY_SARIF_PATH not set"))
+    real_failure = _FakeTool(ScannerError("tfsec produced invalid JSON"))
+    findings = _annotate.collect([("trivy", not_configured), ("tfsec", real_failure)], ".")
+
+    assert findings == []
+    assert ("info", "scanner.not_configured") in events
+    assert ("warning", "scanner.skipped") in events
+    # The opt-out source produced no warning at all.
+    assert ("warning", "scanner.not_configured") not in events
+
+
+# ---------------------------------------------------------------------------
 # whole-codebase LLM review (PR-label trigger)
 # ---------------------------------------------------------------------------
+
+
+def test_security_system_prompt_is_expert_and_grounded() -> None:
+    # The prompt must read as a domain expert with concrete focus areas, and its
+    # discovery must be thorough-but-grounded (no fabrication).
+    with_discovery = prompts_mod.specialist_system_prompt("security", allow_discovery=True)
+    assert "principal cloud-security engineer" in with_discovery
+    assert "least privilege" in with_discovery  # a concrete best-practice focus area
+    assert "0.0.0.0/0" in with_discovery
+    assert "never invent" in with_discovery  # grounding guardrail kept
+    # With discovery off, the discovery clause is withheld and fabrication is barred.
+    no_discovery = prompts_mod.specialist_system_prompt("security", allow_discovery=False)
+    assert "security:llm-" not in no_discovery
+    assert "do not invent findings the scanners did not report" in no_discovery
 
 
 def test_annotate_forces_discovery_for_full_review_without_enable_flag(

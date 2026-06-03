@@ -8,6 +8,11 @@ name: example-caller
 # The `paths` filter lives here, on the trigger — it decides whether a review
 # runs at all. The reviewer additionally early-exits if no Terraform files
 # actually changed, so this filter is just to avoid spinning up the job.
+#
+# ⚠️ SECURITY: trigger on `pull_request`, NEVER `pull_request_target`. A fork PR
+# runs untrusted code; `pull_request_target` would expose your repo secrets
+# (incl. the LLM key) to it. `pull_request` runs with a read-only token and no
+# secrets for fork PRs, which is what you want. See the README "Security" section.
 
 on:
   pull_request:
@@ -60,6 +65,10 @@ jobs:
       fail-on-ai-error: false # default: false
       scan-mode: full # default: full (whole-repo posture) · diff (changed files only)
       inline-comments: true # default: true · one PR comment per finding on a changed line
+      # SECURITY: `tflint --init` downloads + runs the plugins a repo's .tflint.hcl
+      # declares — a malicious PR could run arbitrary code. Off by default; enable
+      # only for repos whose .tflint.hcl you trust.
+      tflint-init: false # default: false
 
       # ── Deterministic lenses (no AI key needed) ──────────────────────────────
       # "" = off · "default" = built-in golden standard · or a path to your own JSON

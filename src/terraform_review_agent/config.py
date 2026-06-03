@@ -99,12 +99,19 @@ class Settings(BaseSettings):
     # Re-runs are idempotent (a hidden per-finding marker dedupes).
     inline_comments: bool = True
 
+    # Run `tflint --init` when the repo ships a `.tflint.hcl`. OFF by default
+    # because `--init` downloads and executes the plugins that file declares — a
+    # malicious PR could point it at an attacker-controlled plugin (arbitrary code
+    # execution). Enable only for repos whose `.tflint.hcl` you trust; with it off,
+    # tflint still runs its built-in rules (and skips cleanly if a plugin block
+    # makes it error).
+    tflint_init: bool = False
+
     # External check sources (Phase 3): each runs as its own CI step and writes a
     # SARIF report; set the path to ingest it. Empty (default) skips the source,
     # so the engine's behaviour is unchanged unless a report is supplied.
-    #   prowler/gitleaks/trivy -> security lens · megalinter -> style lens
+    #   prowler/trivy -> security lens · megalinter -> style lens
     prowler_sarif_path: str | None = None
-    gitleaks_sarif_path: str | None = None
     trivy_sarif_path: str | None = None
     megalinter_sarif_path: str | None = None
     # Coverage report (lcov/cobertura/jacoco) for the A3 lens (Phase 7).

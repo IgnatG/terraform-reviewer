@@ -22,22 +22,80 @@ from terraform_review_agent.utils.tools import FilePayload
 _SEVERITY_VOCAB = "critical, high, medium, low, info"
 
 _PERSONA: dict[AgentName, str] = {
-    "security": "You are a senior cloud-security engineer reviewing a Terraform pull request.",
-    "cost": "You are a FinOps engineer reviewing the cost impact of a Terraform pull request.",
-    "style": "You are a Terraform style reviewer.",
+    "security": (
+        "You are a principal cloud-security engineer and Terraform expert. You "
+        "review infrastructure-as-code the way both an attacker and an auditor "
+        "would — reasoning about exploitability, blast radius, and least "
+        "privilege, grounded in the CIS Benchmarks and the cloud providers' "
+        "Well-Architected security guidance."
+    ),
+    "cost": (
+        "You are a senior FinOps engineer and Terraform expert. You reason about "
+        "monthly run-rate, right-sizing, and waste the way a cost-conscious "
+        "platform team does."
+    ),
+    "style": (
+        "You are a staff platform engineer and Terraform module-design expert. "
+        "You review for maintainability, readability, and idiomatic HCL the way a "
+        "rigorous module author and reviewer would."
+    ),
 }
 
 _SCANNERS: dict[AgentName, str] = {
-    "security": "the tfsec and checkov scanners",
+    "security": "the tfsec, checkov and trivy scanners",
     "cost": "the infracost diff",
     "style": "tflint and `terraform fmt -check`",
+}
+
+# What each expert prioritises. Steers both severity calibration and the
+# discovery pass toward the checks that move real risk/cost/maintainability —
+# not generic advice. Rendered into the system prompt for every agent.
+_FOCUS: dict[AgentName, str] = {
+    "security": (
+        "Focus on the controls that change real risk:\n"
+        "- Public exposure: `0.0.0.0/0` ingress, publicly readable/writable "
+        "buckets, public snapshots/AMIs/RDS, open management ports (22/3389).\n"
+        "- Encryption: at rest (KMS/SSE on S3, EBS, RDS, backups) and in transit "
+        "(TLS, HTTPS-only policies).\n"
+        "- IAM least privilege: wildcard `Action`/`Resource`, over-broad "
+        "AssumeRole trust, inline admin policies, long-lived access keys.\n"
+        "- Secrets: credentials/tokens hardcoded in HCL or defaults instead of a "
+        "secrets manager.\n"
+        "- Logging & audit: missing CloudTrail, VPC flow logs, S3/LB access logs.\n"
+        "- Resilience & data protection: deletion/termination protection, "
+        "versioning, backups, multi-AZ where it matters.\n"
+        "- Network segmentation: overly permissive security groups/NACLs and "
+        "unrestricted egress."
+    ),
+    "cost": (
+        "Focus on the biggest run-rate levers:\n"
+        "- Right-sizing: oversized instance/DB classes, over-provisioned volumes.\n"
+        "- Elasticity: missing autoscaling; always-on resources that could be "
+        "scheduled or serverless.\n"
+        "- Waste: unattached EBS/EIPs, idle NAT gateways, cross-AZ/data-transfer "
+        "sprawl, missing S3/log lifecycle & retention policies.\n"
+        "- Commitment & tiering: on-demand where savings plans/reserved capacity "
+        "or cheaper storage classes fit."
+    ),
+    "style": (
+        "Focus on what keeps a module maintainable:\n"
+        "- Inputs/outputs: every `variable`/`output` has a `description` and an "
+        "explicit `type`; sensible defaults and `validation` where useful.\n"
+        "- No hardcoded values that belong in variables/locals (regions, CIDRs, "
+        "account ids, sizes).\n"
+        "- Pinned provider and module versions; `required_version` set.\n"
+        "- Idiomatic HCL: `for_each` over copy-paste, no needless duplication, "
+        "consistent naming, consistent resource tagging.\n"
+        "- Clear module structure (main/variables/outputs) and readable nesting."
+    ),
 }
 
 # Per-agent guidance for *how to phrase* the rewritten message/suggestion.
 _MESSAGE_GUIDANCE: dict[AgentName, str] = {
     "security": (
-        "Calibrate wording to real-world exploitability and blast radius; do not "
-        "dramatize. `suggestion` is a concrete remediation, or null."
+        "When rewording, calibrate to real-world exploitability and blast radius "
+        "using the focus areas above; do not dramatize. `suggestion` is a "
+        "concrete remediation, or null."
     ),
     "cost": (
         "Name the resource/project and state the monthly delta exactly as it "
@@ -51,31 +109,38 @@ _MESSAGE_GUIDANCE: dict[AgentName, str] = {
     ),
 }
 
-# Discovery guidance, appended only when settings.enable_llm_findings is set.
-# Cost has no source of truth for invented dollar amounts, so it never discovers.
+# Discovery guidance, appended only when discovery is enabled (enable_llm_findings
+# or the whole-repo pass). Cost has no source of truth for invented dollar
+# amounts, so it never discovers. The bar is *grounding*, not timidity: be
+# thorough, but every finding must be justified by code that is actually shown.
 _DISCOVERY: dict[AgentName, str] = {
     "security": (
-        "You may additionally report a real risk no scanner caught: add it to "
-        "`discovered` with a rule id prefixed `security:llm-`, a severity from "
-        f"[{_SEVERITY_VOCAB}], and a file/line in the code below. Do this only "
-        "when you are confident; otherwise leave `discovered` empty."
+        "Then put on your reviewer hat and go beyond the scanners. Apply the "
+        "focus areas above to the code and report every genuine security issue "
+        "they did not catch — insecure defaults, missing controls, dangerous "
+        "design — in `discovered`, each with a rule id prefixed `security:llm-`, "
+        f"a severity from [{_SEVERITY_VOCAB}], and the exact file and line it "
+        "occurs on. Be thorough and specific, but ground every finding in the "
+        "code shown: cite what you can see, and never invent an issue or assume "
+        "configuration that isn't present."
     ),
     "style": (
-        "You may additionally report a clear style/maintainability issue the "
-        "linters missed (naming, missing variable description/type, hardcoded "
-        "values that belong in variables): add it to `discovered` with a rule id "
-        "prefixed `style:llm-` and a file/line in the code below. Otherwise "
-        "leave `discovered` empty."
+        "Then review the code against the focus areas above and report every "
+        "clear maintainability or idiomatic-HCL issue the linters missed in "
+        "`discovered`, each with a rule id prefixed `style:llm-` and the exact "
+        "file and line. Be thorough, but ground every finding in the code shown "
+        "— do not invent issues."
     ),
 }
 
-# Appended to the discovery clause for a whole-codebase review (the PR-label
-# trigger). The model sees every Terraform file, not just the diff, so it should
-# look across the whole repo — while keeping the same no-fabrication bar.
+# Appended to the discovery clause for a whole-codebase review. The model sees
+# every Terraform file, not just the diff, so it should audit the whole repo —
+# while keeping the same grounding bar.
 _WHOLE_REPO_DISCOVERY = (
     "You are reviewing the ENTIRE Terraform codebase below, not only the files "
-    "this PR changed. Report every genuine issue you find in any file — not just "
-    "in changed code — but still only when you are confident it is real."
+    "this PR changed — treat this as a full expert audit. Examine every file and "
+    "report all real issues you find anywhere in the repo, each grounded in the "
+    "code shown."
 )
 
 _ANNOTATION_TASK = """\
@@ -114,10 +179,11 @@ def specialist_system_prompt(
         discovery = f"{discovery}\n\n{_WHOLE_REPO_DISCOVERY}"
     return "\n\n".join(
         [
-            f"{_PERSONA[agent]} You are given (1) findings from {_SCANNERS[agent]} "
-            f"and {files_phrase}.",
+            f"{_PERSONA[agent]}",
+            f"You are given (1) findings from {_SCANNERS[agent]} and {files_phrase}.",
             _ANNOTATION_TASK,
             _MESSAGE_GUIDANCE[agent],
+            _FOCUS[agent],
             discovery or _NO_DISCOVERY,
         ]
     )

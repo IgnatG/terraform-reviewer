@@ -13,7 +13,6 @@ from terraform_review_agent.utils.state import ReviewState
 from terraform_review_agent.utils.tools import (
     prepare_file_payloads,
     run_checkov,
-    run_gitleaks,
     run_prowler_iac,
     run_tfsec,
     run_trivy,
@@ -21,11 +20,13 @@ from terraform_review_agent.utils.tools import (
 
 
 class SecurityLens(Lens):
-    """Misconfigurations / insecure defaults / secrets / vulns.
+    """Misconfigurations / insecure defaults / vulns.
 
-    In-image scanners (tfsec, checkov) plus ingested external SARIF sources
-    (Prowler-IaC, gitleaks, Trivy) when their reports are supplied. The external
-    sources self-skip when unconfigured.
+    In-image scanners (tfsec, checkov, trivy) plus an ingested Prowler-IaC SARIF
+    report when supplied (self-skips when unconfigured). Secret scanning is
+    intentionally excluded: a secrets scanner surfaces credential *values* as
+    findings, which the LLM rewording step would then receive — so it's kept out
+    of the AI path.
     """
 
     id = "security"
@@ -36,9 +37,9 @@ class SecurityLens(Lens):
     def run(self, state: ReviewState) -> LensResult:
         if not state.pr.changed_terraform_paths:
             return LensResult()
-        # Secrets/vuln sources aren't Terraform-specific, so scope findings to
-        # all changed files, not just the .tf ones. (tfsec/checkov only emit in
-        # .tf files, which are a subset, so this doesn't widen their results.)
+        # Vuln sources aren't Terraform-specific, so scope findings to all changed
+        # files, not just the .tf ones. (tfsec/checkov only emit in .tf files,
+        # which are a subset, so this doesn't widen their results.)
         changed = state.pr.changed_paths
         # The whole-codebase LLM review (llm-full-review) feeds every .tf file in
         # the repo to the LLM and forces discovery on; findings it surfaces in
@@ -54,7 +55,6 @@ class SecurityLens(Lens):
                     ("tfsec", run_tfsec),
                     ("checkov", run_checkov),
                     ("prowler", run_prowler_iac),
-                    ("gitleaks", run_gitleaks),
                     ("trivy", run_trivy),
                 ],
                 state.workspace,

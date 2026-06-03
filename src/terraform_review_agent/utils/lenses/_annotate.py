@@ -28,7 +28,7 @@ from terraform_review_agent.utils.state import (
     AgentName,
     Finding,
 )
-from terraform_review_agent.utils.tools import FilePayload, ScannerError
+from terraform_review_agent.utils.tools import FilePayload, ScannerError, ScannerNotConfigured
 
 log = structlog.get_logger(__name__)
 
@@ -40,7 +40,13 @@ def collect(scanners: list[tuple[str, Any]], working_dir: str) -> list[Finding]:
     for name, scanner in scanners:
         try:
             findings.extend(scanner.invoke({"working_dir": working_dir}))
+        except ScannerNotConfigured as exc:
+            # An optional source the caller didn't enable — normal, not a problem.
+            # Logged at info so it never reads as an error on the run.
+            log.info("scanner.not_configured", scanner=name, reason=str(exc))
         except ScannerError as exc:
+            # A configured/bundled scanner that actually failed (missing binary,
+            # bad output) — worth a warning.
             log.warning("scanner.skipped", scanner=name, error=str(exc))
     return findings
 

@@ -98,9 +98,8 @@ DEFAULT_LLM_SEED=7                    # best-effort determinism (OpenAI); `none`
 ENABLE_LLM_FINDINGS=false            # true lets the LLM discover findings on changed files (less deterministic)
 LLM_FULL_REVIEW=false                # true = LLM reviews the whole codebase (every .tf), discovery forced on
 ENABLED_LENSES=                      # CSV of lens ids to run; empty = all (security,cost,style)
-# External SARIF check sources (empty = skip): prowler/gitleaks/trivy -> security, megalinter -> style
+# External SARIF check sources (empty = skip): prowler/trivy -> security, megalinter -> style
 PROWLER_SARIF_PATH=
-GITLEAKS_SARIF_PATH=
 TRIVY_SARIF_PATH=
 MEGALINTER_SARIF_PATH=
 COVERAGE_REPORT_PATH=                 # lcov/cobertura/jacoco, for the A3 lens
@@ -119,6 +118,7 @@ DASHBOARD_INGEST_URL=                  # also DASHBOARD_API_KEY (Bearer) / DASHB
 # Phase 10 scope + inline comments.
 SCAN_MODE=full                         # full (whole-repo posture) | diff (changed files only)
 INLINE_COMMENTS=true                   # post a review comment per finding on a changed line
+TFLINT_INIT=false                      # run `tflint --init` (executes repo .tflint.hcl plugins) — off for safety
 
 SQLITE_PATH=./data/state.sqlite
 
@@ -154,7 +154,7 @@ ENVIRONMENT=development               # development | staging | production
 - **Checkpointer**: off for the MVP (one-shot CI run — no state kept between runs). If persistence is ever needed, add `src/terraform_review_agent/persistence/checkpointer.py` with `SqliteSaver.from_conn_string(settings.sqlite_path)` and the `langgraph-checkpoint-sqlite` dep. Postgres only on explicit request.
 - **Lenses** (`utils/lenses/`): each check is a `Lens` (`id` / `applies_to(state)` / `run(state) -> LensResult`); `registry.enabled_lenses(state)` picks which run (config `ENABLED_LENSES` ∩ applicable). `agent.py` fans out one `Send` per enabled lens into the `findings` reducer; the aggregator is deferred. Add a check = a new `Lens` subclass + a registry entry, no graph change.
 - **Standards** (`utils/standards/` + `rule_packs/`): versioned, cited rule packs map a finding's `{source}:{rule}` to a standard **control** and a three-state class (✅ verified / ◐ evidence / ○ human_only), and declare **expected artefacts** whose absence is a `human_only` finding (gap detection, via `StandardsLens`). The mapper runs at report-build time (`build_findings_report(mapper=…)`); active packs are chosen by `ENABLED_RULE_PACKS` (empty = inert). Add a standard = a new pack JSON, no code.
-- **Check sources** (`utils/sources/`): normalize external-tool output into `Finding`s. `sarif.py` parses any SARIF (MegaLinter, Prowler-IaC, gitleaks, Trivy) preserving the producing tool + rule id as `{source}:{rule}`; `coverage.py` parses lcov/cobertura/jacoco. Tools run as separate CI steps and write reports; the engine ingests them via `*_SARIF_PATH` settings (the ingestion `@tool`s in `tools.py`), self-skipping when unset.
+- **Check sources** (`utils/sources/`): normalize external-tool output into `Finding`s. `sarif.py` parses any SARIF (MegaLinter, Prowler-IaC, Trivy) preserving the producing tool + rule id as `{source}:{rule}`; `coverage.py` parses lcov/cobertura/jacoco. **trivy is bundled in the image and runs directly** (`run_trivy` shells out when no `TRIVY_SARIF_PATH` is set, else ingests the report). **MegaLinter + Prowler-IaC stay ingest-only** — MegaLinter overlaps tflint/checkov + is a heavy Docker action, and Prowler audits live cloud accounts, not Terraform files. **Secret scanning (gitleaks) is deliberately excluded**: it surfaces credential *values* as findings, which would then reach the LLM rewording step. A source with nothing to do raises `ScannerNotConfigured` (logged at info, not warning).
 - **Wedge lenses** (`utils/standardisers/` + `standards_defs/`): the A-coded lenses (A1 Terraform, A2 CI/CD). Deterministic, no LLM — they diff a repo against a *golden definition* (`TerraformStandard` / `CICDBaseline`, versioned + cited JSON) and emit deviation findings + a consistency/posture score, stamping `lens="A1"|"A2"` (the `LensCode` on `Finding`). A2 parses workflow YAML with **PyYAML** (handle the `on:` → `True` boolean-key quirk). Each is inert unless `TERRAFORM_STANDARD` / `CICD_STANDARD` names a def (empty=off · `"default"`=built-in · path=custom); thin `Lens` wrappers in `utils/lenses/` gate on terraform changes like the standards lens. Add a wedge standard = a new def JSON, no code.
 - **Repo lenses A3-A4** (`utils/lenses/{coverage,tech_debt}.py`): deterministic, gated-off-by-default. **A3** ingests a coverage report (`COVERAGE_REPORT_PATH`) → under-covered changed files + score; **A4** ingests jscpd JSON (`JSCPD_REPORT_PATH`) + an optional Sonar SARIF (`SONARQUBE_SARIF_PATH`) → duplication/issue findings + a scorecard. A finding may assert its three-state class directly via `Finding.state` (gap checks); else `findings_report` derives it.
 - **Output surfaces** (Phase 8): from the one `FindingsReport`, the aggregator/entrypoint emit findings.json (`findings_report.py`), a **SARIF** export (`sarif_export.py` → code-scanning), and an HTML+CSV **evidence pack** (`evidence_pack.py`). The comment gains a ✅/◐/○ "Standards readiness" section (`render._readiness_section`) only when there's a three-state story. Per-finding `confidence` is derived from state (verified 1.0 / evidence 0.5 / human_only none).

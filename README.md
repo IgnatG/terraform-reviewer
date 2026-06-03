@@ -21,7 +21,7 @@ run by default:
 
 | Lens | Scanners | Looks for |
 |:--|:--|:--|
-| 🔒 **Security** | `tfsec` + `checkov` (+ optional Prowler/gitleaks/Trivy SARIF) | misconfigurations, insecure defaults, exposed resources, secrets |
+| 🔒 **Security** | `tfsec` + `checkov` + `trivy` (+ optional Prowler SARIF) | misconfigurations, insecure defaults, exposed resources, IaC vulns |
 | 💰 **Cost** | `infracost diff` | monthly cost deltas vs. the base branch |
 | 🎨 **Style** | `tflint` + `terraform fmt -check` (+ optional MegaLinter SARIF) | lint findings and formatting drift |
 
@@ -41,6 +41,75 @@ run. Results are merged, de-duplicated, severity-ranked, and upserted as one
 comment (edited in place on every push) rather than stacking up. Every finding is
 also emitted in a versioned `findings.json` artefact. See
 [`examples/README.md`](examples/README.md) for enabling A1/A2.
+
+
+---
+
+## What it does
+
+A drop-in **GitHub Actions reviewer for Terraform PRs**. It runs proven OSS
+scanners inside a prebuilt container, has an LLM clean up and (optionally) extend
+the findings, and posts a single, always-up-to-date comment on the PR. No
+infrastructure to host — you add one reusable-workflow call and a provider key.
+
+### Features at a glance
+
+- **Multi-lens analysis (parallel).** Security (`tfsec` + `checkov` + `trivy`),
+  Cost (`infracost`), and Style (`tflint` + `terraform fmt`) run by default; five
+  more deterministic lenses (Standards mapping, Terraform-Std A1, CI/CD A2,
+  Coverage A3, Tech-Debt A4) are opt-in. See the tables above.
+
+- **AI layer over deterministic scanners.** With a provider key the LLM **rewords**
+  every scanner finding into one clear, actionable sentence on every run — the
+  finding *set* stays identical, only the wording changes. The scanners, not the
+  model, own what's reported and how severe it is.
+
+- **Optional AI discovery.** Let the model **propose extra findings** the scanners
+  missed — `enable-llm-findings` (scoped to the PR's changed files) or
+  `llm-full-review` (audits **every** `.tf` in the repo). These show as ◐ Evidence
+  and are grounded in the code, never fabricated.
+
+- **Expert prompting.** Each lens is prompted as a domain specialist
+  (cloud-security / FinOps / module-design) with concrete best-practice focus
+  areas, so rewordings and discoveries target what actually moves risk and cost.
+
+- **Multi-provider.** OpenAI, Anthropic, Google Gemini, or Azure OpenAI — pick via
+  `llm-provider`/`llm-model`. A GitHub Copilot reword-only backend is also
+  available. AI is optional: with no key, the deterministic report still posts.
+
+- **Three-state confidence.** Every finding is tagged ✅ **Verified** (a
+  deterministic scanner caught it), ◐ **Evidence** (AI-suggested), or ○ **Human
+  only** (a gap a human must check) — surfaced as a "Detection confidence" /
+  "Standards readiness" table so a clean scanner pass is never mistaken for full
+  coverage.
+
+- **Standards & gap detection.** Versioned, cited **rule packs** map findings to a
+  named standard's controls and flag *missing* expected artefacts (no README,
+  unpinned providers, …) — the gaps a scanner can't see.
+
+- **CI gating, your call.** `fail-on-severity` fails the check at/above a chosen
+  floor (off by default); `fail-on-ai-error` fails it when a configured AI call
+  errors (e.g. bad key/credits) instead of passing green. The comment always
+  posts first.
+
+- **Scan scope.** `scan-mode: full` reports whole-repo posture on every PR (surfaces
+  pre-existing issues); `diff` restricts scanner findings to the changed files.
+
+- **Rich outputs.** One sticky PR comment (grouped by rule, collapsed by
+  severity), optional inline comments on changed lines, and downloadable
+  artefacts: `findings.json` (versioned contract), **SARIF** for the Security →
+  Code-scanning tab, and an **evidence pack** (HTML/CSV). Optional best-effort
+  POST to a hosted dashboard for cross-repo readiness history.
+
+- **Deterministic & safe by design.** Scanner-owned severities + a temperature-0
+  model keep runs reproducible; comments are marker-deduped (idempotent re-runs);
+  AI failures degrade gracefully (the scanner report still posts); and **secret
+  scanning is deliberately excluded** so credential values are never sent to the
+  LLM.
+
+- **Zero-setup runtime.** Everything (Terraform, tfsec, tflint, infracost, checkov,
+  trivy) is pinned in one GHCR image — no per-run installs. Consume it as a
+  reusable workflow pinned to `@v1` (major float) or an exact tag.
 
 
 ---
@@ -103,6 +172,7 @@ additionally early-exits if no Terraform files actually changed.
 | `fail-on-ai-error` | `false` | Fail the check (red ✗) when a **configured** AI call failed this run — bad key, exhausted credits, unsupported model. The deterministic scanner report still posts either way, and AI failures **always** show as a GitHub annotation regardless of this flag; this only controls whether they also turn the check red. Off by default so a transient LLM blip can't block PRs. |
 | `scan-mode` | `full` | `full` reviews the **whole repo** (posture scan — surfaces pre-existing issues, not just the diff); `diff` scopes scanner findings to the files this PR changed. |
 | `inline-comments` | `true` | Also post one **inline** review comment per finding that sits on a changed line (see [Comment surfaces](#comment-surfaces-sticky-vs-inline)). Set `false` for sticky-comment-only. |
+| `tflint-init` | `false` | Run `tflint --init` when the repo ships a `.tflint.hcl`. **Off by default for safety** — `--init` downloads and *executes* the plugins that file declares, so a malicious PR could run arbitrary code. Enable only for repos whose `.tflint.hcl` you trust. See [Security](#security). |
 | `pr-number` | `""` | PR to review. Defaults to the triggering `pull_request` event; required for `workflow_dispatch` runs. |
 
 ## Secrets
@@ -257,6 +327,40 @@ with:
 
 Scanner versions are pinned in the container image — bumping one is a
 rebuild-image PR in this repo, not an edit to your workflow file.
+
+---
+
+## Security
+
+This reviewer runs scanners over — and sends Terraform to an LLM about — code
+from pull requests, so treat PR content as untrusted. The defaults are chosen to
+be safe; the notes below matter most when reviewing **fork** PRs.
+
+- **Trigger on `pull_request`, never `pull_request_target`.** `pull_request_target`
+  runs with your repo's secrets (including the LLM key) available to untrusted
+  fork code — a credential-theft path. Plain `pull_request` gives fork PRs a
+  read-only token and no secrets, which is what you want. The example callers use
+  `pull_request`.
+- **`.tfvars` is never sent to the LLM.** Variable files routinely hold secrets,
+  so their contents are excluded from the prompt payloads. The scanners still read
+  them from disk, so detection is unaffected — only the raw secret values are kept
+  out of the model. (Other `.tf` file contents *are* sent for context; don't
+  hardcode secrets in `.tf` — use a secrets manager.)
+- **`tflint --init` is opt-in (`tflint-init: false`).** `--init` downloads and
+  executes the plugins a repo's `.tflint.hcl` declares, so a malicious PR could
+  achieve code execution. Leave it off unless you trust the repo's `.tflint.hcl`.
+- **No secret scanning on purpose.** A secrets scanner surfaces credential
+  *values* as findings, which would then flow into the LLM rewording step — so
+  it's deliberately excluded.
+- **AI is fail-safe.** A missing/broken AI backend never blocks the run; the
+  deterministic scanner report still posts (and `fail-on-ai-error` can surface the
+  failure as a red check).
+- **Hardening for sensitive repos.** The published image
+  (`ghcr.io/ignatg/terraform-reviewer`) tracks a floating major tag and the job
+  runs as root inside the container to write the GitHub-mounted workspace. For
+  high-assurance use, run on **self-hosted runners with egress filtering** and pin
+  the image by digest. Image signing/SBOM and a non-root container are tracked
+  hardening items.
 
 ---
 

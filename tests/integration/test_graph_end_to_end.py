@@ -153,6 +153,10 @@ def _fake_scanner_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedPro
         return _completed(_TERRAFORM_FMT_STDOUT, returncode=3)
     if binary == "infracost":
         return _completed(json.dumps(_INFRACOST_JSON))
+    if binary == "trivy":
+        # Bundled trivy: SARIF on stdout. Empty here so these tests' finding set
+        # stays driven by tfsec/checkov.
+        return _completed(json.dumps({"runs": []}))
     raise AssertionError(f"unexpected scanner invocation: {cmd!r}")
 
 
