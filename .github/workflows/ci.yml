@@ -1,6 +1,6 @@
 name: ci
 
-run-name: "CI · ${{ github.head_ref || github.ref_name }} · @${{ github.actor }}"
+run-name: "CI for ${{ github.ref_name }}"
 
 # Lint, type-check, and test the Python code on every PR and on pushes to main.
 # Runs the same `make` targets developers use locally (CLAUDE.md §8) so CI and
