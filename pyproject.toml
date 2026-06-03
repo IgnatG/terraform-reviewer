@@ -10,7 +10,7 @@ requires-python = ">=3.13,<3.14"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "ignatg" }]
 dependencies = [
-    "langgraph>=1.2",
+    "langgraph>=1.2.4",
     "langchain-core>=1.4",
     "langchain-openai>=1.2",
     "langchain-anthropic>=1.4",
@@ -37,7 +37,7 @@ dev = [
 # lockfile captures checkov *and its transitive tree*; the binary scanners
 # (terraform/tfsec/tflint/infracost) stay pinned via Dockerfile ARGs.
 container = [
-    "checkov==3.2.531",
+    "checkov==3.2.532",
 ]
 
 [tool.hatch.build.targets.wheel]
