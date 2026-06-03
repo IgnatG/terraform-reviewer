@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.4.0...v1.5.0) (2026-06-03)
+
+
+### Features
+
+* **copilot:** :sparkles: enhance Copilot backend with delta and error handling ([88f44dc](https://github.com/IgnatG/terraform-reviewer/commit/88f44dcea69b14ce4efa84595ca9b427bce28f91))
+
+
+### Tests
+
+* **copilot:** :test_tube: enhance Copilot SDK test with valid response handling ([7e7fbd8](https://github.com/IgnatG/terraform-reviewer/commit/7e7fbd89921fa2401cb70b39f5b0c988f6b3f20b))
+
 ## [1.4.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.3.1...v1.4.0) (2026-06-03)
 
 
