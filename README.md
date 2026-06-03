@@ -67,7 +67,7 @@ on:
 
 jobs:
   terraform-review:
-    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1.0.0
+    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1  # or pin @v1.2.3
     permissions:
       contents: read          # checkout
       pull-requests: write    # post/edit the sticky comment
@@ -171,7 +171,7 @@ edited in place.
 ```
 GitHub PR event
   └─► reusable workflow (terraform-review.yml)
-        └─► container: ghcr.io/ignatg/terraform-reviewer:v1.0.0
+        └─► container: ghcr.io/ignatg/terraform-reviewer:v1   (also tagged :v1.x.y · :latest)
               └─► python -m terraform_review_agent.entrypoint
                     └─► LangGraph:
                           start ─► [lens ∥ lens ∥ …] ─► aggregator ─► post_comment
@@ -196,6 +196,12 @@ uploads them all as the `terraform-review-findings` artefact. Set
 `DASHBOARD_INGEST_URL` (+ `DASHBOARD_API_KEY`) to also POST the `findings.json`
 to a hosted dashboard for per-standard readiness history — opt-in and
 best-effort (a dashboard outage never fails the scan).
+
+By default the reviewer scans the **whole repo** (`scan-mode: full`; use `diff`
+to scope to changed files) and posts an **inline review comment** on each finding
+that sits on a changed line (`inline-comments: true`; re-runs are idempotent).
+Findings off the diff stay in the sticky comment, which groups repeated rules and
+collapses Medium so large result sets stay readable.
 
 Scanner versions are pinned in the container image — bumping one is a
 rebuild-image PR in this repo, not an edit to your workflow file.

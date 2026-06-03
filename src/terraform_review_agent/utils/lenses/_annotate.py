@@ -46,13 +46,16 @@ def collect(scanners: list[tuple[str, Any]], working_dir: str) -> list[Finding]:
 
 
 def filter_to_changed(findings: list[Finding], changed_paths: set[str]) -> list[Finding]:
-    """Keep only findings attributable to a Terraform file this PR changed.
+    """Scope repo-wide scanner output to the PR's changed files — unless full scan.
 
-    Scanners run over the whole workspace, so findings in unchanged files (and
-    findings with no resolvable path) would otherwise leak into the review. This
-    scopes them deterministically instead of relying on the LLM to drop them.
+    Scanners run over the whole workspace. In ``diff`` mode, findings in unchanged
+    files (and findings with no resolvable path) are dropped deterministically so
+    the review reflects only what the PR touched. In ``full`` mode (the default
+    posture scan) every finding is kept.
     """
 
+    if settings.scan_mode == "full":
+        return list(findings)
     return [f for f in findings if f.file in changed_paths]
 
 

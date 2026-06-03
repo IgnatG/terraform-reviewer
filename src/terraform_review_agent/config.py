@@ -14,6 +14,9 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLMProvider = Literal["openai", "anthropic", "google", "azure"]
+# Scan scope: "full" reviews the whole repo (posture scan — the default for an
+# assessor); "diff" scopes scanner findings to the files this PR changed.
+ScanMode = Literal["full", "diff"]
 # Which AI backend rewords findings: BYOK (your own provider key, the default)
 # or the bundled GitHub Copilot CLI. Both only reword — never change a verdict.
 AIBackendName = Literal["byok", "copilot"]
@@ -78,6 +81,17 @@ class Settings(BaseSettings):
     # "security,style"). Empty (default) runs every registered lens that applies
     # to the repo. Unknown ids are ignored. See `utils.lenses.registry`.
     enabled_lenses: str = ""
+
+    # Scan scope (Phase 10). "full" (default) reports findings across the whole
+    # repo — the assessor's posture scan; "diff" scopes scanner findings to the
+    # files this PR changed. Repo-level lenses (A1/A2/A5, gap detection) are
+    # always whole-repo; this only governs the diff-scoped scanner lenses.
+    scan_mode: ScanMode = "full"
+
+    # Post a PR review with a comment on each finding that sits on a changed line
+    # (Phase 10). On by default; findings off the diff stay in the sticky summary.
+    # Re-runs are idempotent (a hidden per-finding marker dedupes).
+    inline_comments: bool = True
 
     # External check sources (Phase 3): each runs as its own CI step and writes a
     # SARIF report; set the path to ingest it. Empty (default) skips the source,

@@ -39,27 +39,6 @@
       "target": "accessibility-statement.md,accessibility.md,public/accessibility-statement.html,app/views/accessibility-statement.html",
       "state": "verified",
       "severity": "medium"
-    },
-    {
-      "id": "secure-secrets-in-history",
-      "title": "No secrets committed in git history",
-      "source_url": "https://www.gov.uk/service-manual/technology/securing-your-information",
-      "check": "out_of_scope",
-      "state": "evidence"
-    },
-    {
-      "id": "accessibility-wcag-rendered",
-      "title": "Pages meet WCAG 2.2 AA (automated rendered checks)",
-      "source_url": "https://www.gov.uk/service-manual/helping-people-to-use-your-service/testing-for-accessibility",
-      "check": "out_of_scope",
-      "state": "human_only"
-    },
-    {
-      "id": "content-designed-to-gds",
-      "title": "Content is designed to GDS content standards",
-      "source_url": "https://www.gov.uk/guidance/content-design",
-      "check": "out_of_scope",
-      "state": "human_only"
     }
   ]
 }

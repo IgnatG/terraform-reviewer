@@ -182,7 +182,7 @@ def build_findings_report(
     pr: PRContext,
     findings: list[Finding],
     cost_summary: CostSummary | None,
-    mode: ScanMode = "diff",
+    mode: ScanMode = "full",
     scan_time: datetime | None = None,
     mapper: StandardMapper | None = None,
 ) -> FindingsReport:

@@ -28,9 +28,9 @@ on:
 
 jobs:
   terraform-review:
-    # Pin to an exact released tag of the engine repo (major.minor.patch); bump
-    # to adopt a newer reviewer release.
-    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1.0.0
+    # @v1 tracks the latest v1.x.y release (auto-updates within the major); pin
+    # an exact tag (e.g. @v1.2.3) instead if you want fully reproducible runs.
+    uses: IgnatG/terraform-reviewer/.github/workflows/terraform-review.yml@v1
     permissions:
       contents: read
       pull-requests: write
@@ -39,6 +39,8 @@ jobs:
       llm-provider: anthropic
       llm-model: claude-sonnet-4-5
       fail-on-severity: high # fail the check on any high/critical finding
+      # scan-mode: full        # full=whole-repo posture (default) · diff=changed files only
+      # inline-comments: true  # comment on findings that sit on changed lines (default on)
       # Wedge lenses (deterministic, no AI needed). "default" uses the built-in
       # golden standards; point at a committed JSON to enforce your own house
       # standard (e.g. terraform-standard: .assessor/terraform-house.json).

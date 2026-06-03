@@ -116,6 +116,9 @@ JSCPD_REPORT_PATH=                    # A4 duplication · SONARQUBE_SARIF_PATH f
 SARIF_OUTPUT_PATH=./findings.sarif    # also EVIDENCE_HTML_PATH / EVIDENCE_CSV_PATH
 # Phase 9 dashboard ingest (opt-in; empty=off). POST is best-effort, never fails the scan.
 DASHBOARD_INGEST_URL=                  # also DASHBOARD_API_KEY (Bearer) / DASHBOARD_TIMEOUT_SECONDS
+# Phase 10 scope + inline comments.
+SCAN_MODE=full                         # full (whole-repo posture) | diff (changed files only)
+INLINE_COMMENTS=true                   # post a review comment per finding on a changed line
 
 SQLITE_PATH=./data/state.sqlite
 
@@ -155,6 +158,8 @@ ENVIRONMENT=development               # development | staging | production
 - **Repo lenses A3-A5** (`utils/lenses/{coverage,tech_debt,gds}.py`): deterministic, gated-off-by-default. **A3** ingests a coverage report (`COVERAGE_REPORT_PATH`) → under-covered changed files + score; **A4** ingests jscpd JSON (`JSCPD_REPORT_PATH`) + an optional Sonar SARIF (`SONARQUBE_SARIF_PATH`) → duplication/issue findings + a scorecard; **A5** (`GDS_STANDARD`) checks govuk-frontend + artefact presence and reports each GDS point ✅/◐/○, marking rendered/judgement points out-of-scope honestly (never faked, never scored). A finding may assert its three-state class directly via `Finding.state` (A5); else `findings_report` derives it.
 - **Output surfaces** (Phase 8): from the one `FindingsReport`, the aggregator/entrypoint emit findings.json (`findings_report.py`), a **SARIF** export (`sarif_export.py` → code-scanning), and an HTML+CSV **evidence pack** (`evidence_pack.py`). The comment gains a ✅/◐/○ "Standards readiness" section (`render._readiness_section`) only when there's a three-state story. Per-finding `confidence` is derived from state (verified 1.0 / evidence 0.5 / human_only none).
 - **Dashboard ingest** (Phase 9): `dashboard_client.DashboardClient` POSTs the `FindingsReport` to `DASHBOARD_INGEST_URL` (`entrypoint._post_to_dashboard`). **Opt-in** (`from_settings` → `None` when no URL) + **best-effort** (`post_report` swallows `httpx` errors → `False`, never raises) so a dashboard outage can't fail a scan — same rule as the AI backend. Rule-pack/standard-def curation is a content workstream: [`docs/rule-pack-curation.md`](docs/rule-pack-curation.md).
+- **Scan scope + inline comments** (Phase 10): `SCAN_MODE` (`full` default = whole-repo posture; `diff` = changed files only) gates `_annotate.filter_to_changed` + the coverage lens; repo-level lenses (A1/A2/A5, gaps) are always whole-repo. `INLINE_COMMENTS` (on by default) → `entrypoint._post_inline_comments` posts one PR review comment per finding on a changed line (`utils/diff.commentable_lines` parses hunks; `github_client.post_review_comments` is idempotent via a `tra-inline:<key>` marker, best-effort on httpx errors). The sticky comment renders one collapsible `<details>` section per severity (critical/high open, the rest collapsed + grouped by rule; `render._findings_sections`/`_grouped_table`), with the headline summary always visible.
+- **Releases** are automated via release-please + Conventional Commits (`feat`→minor, `fix`→patch, `feat!`→major): merging the release PR cuts `vX.Y.Z` + `vX` git tags and pushes `:vX.Y.Z`/`:vX`/`:latest` (build chained in `release-please.yml`, since a GITHUB_TOKEN tag can't trigger `build-image.yml`). The image pin in `terraform-review.yml` is `extra-files`-managed (`# x-release-please-version`). Don't hand-tag — see `RELEASING.md`.
 - **Tools** (`utils/tools.py`): `@tool` from `langchain_core.tools` with Pydantic input schemas.
 - **Prompts** (`utils/prompts.py`): never inlined in node code.
 - **Config** (`config.py`): `pydantic_settings.BaseSettings` reading env — secrets never hardcoded.

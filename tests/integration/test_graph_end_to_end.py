@@ -245,7 +245,8 @@ def test_full_review_renders_every_severity(
 
     assert final.skipped is False
 
-    # Each lens surfaced its recorded findings, scoped to the changed file.
+    # Each lens surfaced its recorded findings (all on main.tf, so the result is
+    # the same under full or diff scan mode).
     assert [f.rule for f in _by_agent(final, "security")] == [
         "tfsec:aws-s3-enable-bucket-encryption",
         "checkov:CKV_AWS_18",
@@ -273,11 +274,11 @@ def test_full_review_renders_every_severity(
     assert md.startswith("## Terraform Review Agent")
     assert "**5 findings**" in md
     assert "Infracost estimate:" in md and "$520.50/mo" in md
-    # One inline section per visible severity, low collapsed into <details>.
-    assert "### 🔴 Critical (1)" in md
-    assert "### 🟠 High (2)" in md  # checkov HIGH + infracost high
-    assert "### 🟡 Medium (1)" in md  # tflint warning -> medium
-    assert "<summary>Low &amp; info (1)</summary>" in md  # terraform-fmt low
+    # One collapsible section per severity: critical/high open, the rest collapsed.
+    assert "<details open>\n<summary>🔴 Critical (1)</summary>" in md
+    assert "<details open>\n<summary>🟠 High (2)</summary>" in md  # checkov HIGH + infracost high
+    assert "<details>\n<summary>🟡 Medium (1)</summary>" in md  # tflint warning -> medium
+    assert "<details>\n<summary>🔵 Low (1)</summary>" in md  # terraform-fmt low
     # Scanner-owned wording survived (annotations were empty).
     assert "Bucket does not have encryption enabled" in md
 
@@ -396,6 +397,7 @@ class _FakeGitHubClient:
     def __init__(self, pr: PRContext) -> None:
         self._pr = pr
         self.upserts: list[tuple[str, int, str]] = []
+        self.review_comments: list[Any] = []
 
     def fetch_pr_context(self, repository: str, pr_number: int) -> PRContext:
         return self._pr
@@ -403,6 +405,10 @@ class _FakeGitHubClient:
     def upsert_sticky_comment(self, repository: str, pr_number: int, body: str) -> int:
         self.upserts.append((repository, pr_number, body))
         return 9999
+
+    def post_review_comments(self, repository: str, pr_number: int, comments: list[Any]) -> int:
+        self.review_comments.append(comments)
+        return len(comments)
 
 
 def test_entrypoint_run_posts_sticky_comment(
@@ -445,6 +451,9 @@ def test_entrypoint_run_posts_sticky_comment(
     assert "## Terraform Review Agent" in body
     assert "tfsec:aws-s3-enable-bucket-encryption" in body
     assert "Infracost estimate:" not in body  # cost agent was disabled
+    # The changed file carries no patch, so no finding sits on a diff line -> no
+    # inline review comments are posted (they stay in the sticky summary).
+    assert client.review_comments == []
 
 
 # ---------------------------------------------------------------------------

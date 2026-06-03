@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from terraform_review_agent.config import settings
 from terraform_review_agent.utils.findings_report import (
     build_findings_report,
     render_findings_json,
@@ -77,6 +78,7 @@ def aggregator_node(state: ReviewState) -> dict[str, str]:
         pr=state.pr,
         findings=findings,
         cost_summary=state.cost_summary,
+        mode=settings.scan_mode,
         mapper=build_active_mapper(),
     )
     # The report's records drive the ✅/◐/○ readiness section in the comment.

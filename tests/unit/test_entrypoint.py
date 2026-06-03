@@ -17,9 +17,10 @@ from terraform_review_agent.entrypoint import (
     GATING_EXIT_CODE,
     _ensure_workspace,
     _max_severity_finding,
+    _post_inline_comments,
     _post_to_dashboard,
 )
-from terraform_review_agent.utils.state import Finding, PRContext, ReviewState
+from terraform_review_agent.utils.state import ChangedFile, Finding, PRContext, ReviewState
 
 
 def _pr() -> PRContext:
@@ -150,6 +151,81 @@ def test_post_to_dashboard_noop_when_unconfigured(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(entrypoint.DashboardClient, "from_settings", lambda *a, **k: None)
     state = _state(findings=[]).model_copy(update={"findings_report_json": '{"x": 1}'})
     _post_to_dashboard(state)  # no client, no parse, no raise
+
+
+# ---------------------------------------------------------------------------
+# _post_inline_comments (Phase 10)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingGH:
+    def __init__(self, exc: Exception | None = None) -> None:
+        self.posted: list[object] = []
+        self._exc = exc
+
+    def post_review_comments(self, repository: str, pr_number: int, comments: list) -> int:  # type: ignore[type-arg]
+        if self._exc is not None:
+            raise self._exc
+        self.posted.append(comments)
+        return len(comments)
+
+
+def _pr_with_patch() -> PRContext:
+    return PRContext(
+        repository="acme/example",
+        pr_number=7,
+        base_sha="a" * 7,
+        head_sha="b" * 7,
+        base_ref="main",
+        head_ref="feature/x",
+        changed_files=[ChangedFile(path="main.tf", patch="@@ -0,0 +1,2 @@\n+line1\n+line2")],
+    )
+
+
+def _located(file: str, line: int | None, rule: str) -> Finding:
+    return Finding(agent="security", severity="high", file=file, line=line, rule=rule, message="m")
+
+
+def test_post_inline_comments_only_for_diff_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(entrypoint.settings, "inline_comments", True)
+    gh = _RecordingGH()
+    state = ReviewState(
+        pr=_pr_with_patch(),
+        findings=[
+            _located("main.tf", 1, "tfsec:on-diff"),  # line 1 is in the diff -> commented
+            _located("main.tf", 5, "tfsec:off-diff"),  # line 5 not in diff -> skipped
+            _located("other.tf", 1, "tfsec:no-patch"),  # file has no patch -> skipped
+            _located("main.tf", None, "tfsec:no-line"),  # no line -> skipped
+        ],
+    )
+
+    _post_inline_comments(gh, "acme/example", 7, state)  # type: ignore[arg-type]
+
+    assert len(gh.posted) == 1
+    comments = gh.posted[0]
+    assert [(c.path, c.line) for c in comments] == [("main.tf", 1)]
+    assert "tfsec:on-diff" in comments[0].body
+
+
+def test_post_inline_comments_disabled_by_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(entrypoint.settings, "inline_comments", False)
+    gh = _RecordingGH()
+    state = ReviewState(pr=_pr_with_patch(), findings=[_located("main.tf", 1, "tfsec:x")])
+
+    _post_inline_comments(gh, "acme/example", 7, state)  # type: ignore[arg-type]
+
+    assert gh.posted == []  # flag off -> never calls the client
+
+
+def test_post_inline_comments_swallows_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    monkeypatch.setattr(entrypoint.settings, "inline_comments", True)
+    gh = _RecordingGH(exc=httpx.ConnectError("boom"))
+    state = ReviewState(pr=_pr_with_patch(), findings=[_located("main.tf", 1, "tfsec:x")])
+
+    # Must not raise — a failed inline post never fails the run.
+    _post_inline_comments(gh, "acme/example", 7, state)  # type: ignore[arg-type]
 
 
 def test_post_to_dashboard_posts_parsed_report_when_configured(

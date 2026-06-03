@@ -12,6 +12,7 @@ findings, so the comment body will be empty until Phases 4-5 land.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import subprocess
 import sys
@@ -19,14 +20,17 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 import structlog
 
 from terraform_review_agent.agent import agent
 from terraform_review_agent.config import FailOnSeverity, Settings, settings
 from terraform_review_agent.dashboard_client import DashboardClient
-from terraform_review_agent.github_client import GitHubClient
+from terraform_review_agent.github_client import GitHubClient, ReviewComment, inline_marker
+from terraform_review_agent.utils.diff import commentable_lines
 from terraform_review_agent.utils.evidence_pack import render_evidence_csv, render_evidence_html
 from terraform_review_agent.utils.findings_report import FindingsReport
+from terraform_review_agent.utils.render import dedupe_findings, sort_findings
 from terraform_review_agent.utils.sarif_export import render_sarif_json
 from terraform_review_agent.utils.state import SEVERITY_ORDER, Finding, PRContext, ReviewState
 
@@ -174,6 +178,52 @@ def _post_to_dashboard(final: ReviewState) -> None:
     client.post_report(FindingsReport.model_validate_json(final.findings_report_json))
 
 
+def _inline_key(finding: Finding) -> str:
+    """Stable per-finding key for the idempotent inline-comment marker."""
+
+    raw = f"{finding.file}|{finding.rule}|{finding.line}"
+    return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+
+
+def _inline_comment_body(finding: Finding) -> str:
+    """The body for one inline review comment (carries the dedupe marker)."""
+
+    parts = [inline_marker(_inline_key(finding)), "", f"**{finding.message}**"]
+    if finding.suggestion:
+        parts += ["", f"💡 {finding.suggestion}"]
+    parts += ["", f"<sub>`{finding.rule}` · {finding.agent}</sub>"]
+    return "\n".join(parts)
+
+
+def _post_inline_comments(
+    gh: GitHubClient, repository: str, pr_number: int, final: ReviewState
+) -> None:
+    """Post an inline review comment per finding that sits on a changed line.
+
+    Behind ``settings.inline_comments`` (on by default). Only findings whose
+    (file, line) is on the PR diff are eligible — GitHub rejects comments off the
+    diff, so the rest stay in the sticky summary. Best-effort: a failure is logged
+    and never fails the run. The client dedupes by marker, so re-runs don't repost.
+    """
+
+    if not settings.inline_comments:
+        return
+    patches = {f.path: f.patch for f in final.pr.changed_files}
+    comments: list[ReviewComment] = []
+    # dedupe_findings collapses the (file, rule, line) key, so each survivor maps
+    # to a distinct inline comment.
+    for f in sort_findings(dedupe_findings(final.all_findings())):
+        if f.line is None or f.line not in commentable_lines(patches.get(f.file)):
+            continue
+        comments.append(ReviewComment(path=f.file, line=f.line, body=_inline_comment_body(f)))
+    if not comments:
+        return
+    try:
+        gh.post_review_comments(repository, pr_number, comments)
+    except httpx.HTTPError as exc:
+        log.warning("inline comments failed; continuing", repo=repository, error=str(exc))
+
+
 def _ensure_workspace(pr: PRContext, base_dir: str) -> str:
     """Return a workspace containing the PR's files.
 
@@ -231,6 +281,7 @@ def run(
 
     if final.comment_markdown:
         comment_id = gh.upsert_sticky_comment(repository, pr_number, final.comment_markdown)
+        _post_inline_comments(gh, repository, pr_number, final)
         return final.model_copy(update={"posted_comment_id": comment_id})
 
     log.info("no comment markdown produced; skipping upsert")

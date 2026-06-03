@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify every bundled scanner binary resolves on PATH and the agent imports.
-# Run as a Docker build step (fails the build on a missing binary) and in CI
-# against the built image.
+# Runs as the final Docker build layer, so a missing/broken binary fails the
+# image build (and therefore CI) before anything is pushed.
 set -euo pipefail
 
 bins=(terraform tfsec tflint infracost checkov)

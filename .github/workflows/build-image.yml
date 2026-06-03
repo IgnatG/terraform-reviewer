@@ -1,21 +1,35 @@
 name: build-image
 
-# Builds the prebuilt reviewer image and pushes it to GHCR. Triggered on version
-# tags only (v*.*.*) — images are release artifacts, not built on every main
-# push. The reusable workflow (Phase 7) runs its job inside this image, so there
-# are no per-run scanner installs.
+# Builds the prebuilt reviewer image and pushes it to GHCR. Invoked by the
+# release-please workflow on a release (workflow_call with the new version), or
+# manually (workflow_dispatch). Releases own versioning now, so there is no
+# tag-push trigger — a release-please tag wouldn't fire it anyway (a tag created
+# with GITHUB_TOKEN doesn't trigger other workflows), hence the chained call.
+#
+# Publishes BOTH the exact vX.Y.Z tag and the moving vX major float (plus latest
+# + sha-<short>), so consumers can pull either format. The reusable review
+# workflow runs its job inside this image — no per-run scanner installs.
 
 on:
-  push:
-    tags: ["v*.*.*"]
+  workflow_call:
+    inputs:
+      version:
+        description: "Semver to tag the image with, e.g. 1.2.3 (no leading v)."
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver to tag the image with, e.g. 1.2.3 (no leading v)."
+        required: true
+        type: string
 
 permissions:
   contents: read
   packages: write
 
 concurrency:
-  group: build-image-${{ github.ref }}
+  group: build-image-${{ inputs.version }}
   cancel-in-progress: true
 
 env:
@@ -44,20 +58,20 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # latest=auto tags `latest` on the newest stable semver tag (skips
-          # pre-releases). vX.Y.Z + vX major float + sha-<short> per commit.
+          # `value:` feeds the version explicitly (this isn't a tag-push, so the
+          # git ref can't supply it). Emits vX.Y.Z (exact) + vX (major float) +
+          # latest (newest stable) + sha-<short> (traceable per build).
           flavor: latest=auto
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}
+            type=semver,pattern=v{{version}},value=v${{ inputs.version }}
+            type=semver,pattern=v{{major}},value=v${{ inputs.version }}
             type=sha,prefix=sha-,format=short
 
       # Single build that pushes on success. The Dockerfile runs
       # scripts/smoke_test.sh as its final layer, so a broken image (missing or
       # wrong-arch binary, failed import) fails `docker build` and is never
-      # pushed — no separate load-then-smoke-test-then-rebuild pass is needed.
-      # The smoke output is visible in the build logs; layers are reused across
-      # runs via the GHA cache.
+      # pushed. The smoke output is visible in the build logs; layers are reused
+      # across runs via the GHA cache.
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:

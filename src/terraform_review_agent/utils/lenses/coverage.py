@@ -80,10 +80,13 @@ class CoverageLens(Lens):
 
         threshold = settings.coverage_min_percent
         changed = state.pr.changed_paths
+        full_scan = settings.scan_mode == "full"
         findings: list[Finding] = []
         # Stable order: lowest coverage first (the "critical path" ranking).
         for fc in sorted(report.files, key=lambda f: (f.percent, f.path)):
-            target = _match(changed, fc.path)
+            # Full scan flags every under-covered file; diff scopes to the PR's
+            # changed files (matched to the coverage tool's own path roots).
+            target = fc.path if full_scan else _match(changed, fc.path)
             if target is None or fc.percent >= threshold:
                 continue
             findings.append(

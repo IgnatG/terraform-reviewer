@@ -135,6 +135,7 @@ def test_security_lens_ingests_gitleaks_scoped_to_changed_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Isolate the source: in-image + other external scanners report nothing.
+    monkeypatch.setattr(settings, "scan_mode", "diff")  # this test asserts diff-scoping
     for name in ("run_tfsec", "run_checkov", "run_prowler_iac", "run_trivy"):
         monkeypatch.setattr(security_mod, name, _Empty())
     _no_llm(monkeypatch)

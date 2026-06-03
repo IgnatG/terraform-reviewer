@@ -32,6 +32,14 @@ repo.
 > artefact. A3/A4 ingest reports your own CI steps produce, so add those steps
 > (and a path) before enabling them.
 
+**Scope & inline comments.** `scan-mode` is `full` by default (reviews the whole
+repo — the assessor posture scan); set `scan-mode: diff` to scope scanner findings
+to the files the PR changed. `inline-comments` is on by default — the reviewer
+posts a PR review comment on each finding that sits on a changed line (findings
+off the diff stay in the sticky summary, which groups repeated rules and collapses
+Medium so it stays scannable). Set `inline-comments: false` to keep everything in
+the single sticky comment.
+
 ### Enable with the built-in standards
 
 In your caller (see `example-caller.yml`):

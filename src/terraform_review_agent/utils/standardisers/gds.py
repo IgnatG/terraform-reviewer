@@ -150,6 +150,9 @@ def evaluate_gds(workspace: str | Path, definition: GDSDefinition) -> list[Findi
             )
 
     out_of_scope = len(definition.points) - checkable
+    message = f"GDS readiness ({definition.name}): {met}/{checkable} code-evidenceable points met"
+    if out_of_scope:
+        message += f"; {out_of_scope} point(s) need manual/rendered review"
     findings.append(
         Finding(
             agent="gds",
@@ -157,10 +160,7 @@ def evaluate_gds(workspace: str | Path, definition: GDSDefinition) -> list[Findi
             severity="info",
             file=".",
             rule="gds:score",
-            message=(
-                f"GDS readiness ({definition.name}): {met}/{checkable} code-evidenceable "
-                f"points met; {out_of_scope} point(s) need manual/rendered review."
-            ),
+            message=f"{message}.",
             state="verified",
         )
     )

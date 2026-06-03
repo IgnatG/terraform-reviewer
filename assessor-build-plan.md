@@ -182,7 +182,8 @@ Goal: feed Surface 3 and stand up the moat content (§6, §1).
 
 Pick up as needed; none block the MVP.
 
-- [ ] **Diff mode vs full-scan mode** — changed-files-only on PR; full portfolio scan on a schedule. Consider LangGraph **node caching** (`add_node(..., cache_policy=CachePolicy(ttl=…))` + `compile(cache=…)`, available in 1.2.x) to skip re-running unchanged scanners across the two modes.
+- [x] **Diff mode vs full-scan mode** — `SCAN_MODE` (`full` default = whole-repo posture scan; `diff` = changed-files-only). Gates `_annotate.filter_to_changed` (no-op in full) + the coverage lens; repo-level lenses (A1/A2/A5, gaps) are always whole-repo; the mode flows into the findings report. *(Node caching across modes is still a future optimization.)*
+- [x] **Inline PR review comments + scannable comment** — `INLINE_COMMENTS` (on by default): one review comment per finding on a changed line (`utils/diff.commentable_lines` + idempotent `github_client.post_review_comments`); findings off the diff stay in the summary. The sticky comment renders one collapsible `<details>` section per severity (critical/high open, the rest collapsed + grouped by rule via `render._findings_sections`/`_grouped_table`), keeping the headline summary always visible. *(Reporting enhancement over Phase 8.)*
 - [ ] **Waiver / risk-acceptance workflow** — accept a finding with justification + owner + expiry, audit-trailed (DefectDojo-modelled, §2.2).
 - [ ] **Scheduled scans + drift/regression alerts** — flag when a green repo backslides.
 - [ ] **Air-gapped / offline mode** — deterministic checks + a local/approved model, no external calls (sensitive gov estates).

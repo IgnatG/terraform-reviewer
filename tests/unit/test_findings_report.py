@@ -85,6 +85,7 @@ def test_report_validates_against_schema() -> None:
         pr=_pr(),
         findings=_findings(),
         cost_summary=CostSummary(total_monthly=120.0, delta_monthly=15.0),
+        mode="diff",
         scan_time=FIXED_TIME,
     )
     payload = json.loads(render_findings_json(report))

@@ -251,8 +251,9 @@ def test_security_lens_blank_annotation_preserves_scanner_text(
 def test_security_lens_filters_unchanged_file_findings_from_llm_input(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # Scanners run repo-wide; a finding in an unchanged file must not be fed to
-    # the LLM (deterministic pre-filter), only the changed-file finding.
+    # Scanners run repo-wide; in diff mode a finding in an unchanged file must
+    # not be fed to the LLM (deterministic pre-filter), only the changed-file one.
+    monkeypatch.setattr(settings, "scan_mode", "diff")
     (tmp_path / "main.tf").write_text('resource "aws_s3_bucket" "b" {}\n')
     state = _state(tmp_path, files=[ChangedFile(path="main.tf")])
 
@@ -286,6 +287,32 @@ def test_security_lens_filters_unchanged_file_findings_from_llm_input(
     assert [f.rule for f in out.findings] == ["tfsec:changed"]
 
 
+def test_security_lens_full_scan_keeps_unchanged_file_findings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # In full mode (the default), a repo-wide finding in an unchanged file is
+    # kept — the posture scan reports the whole repo, not just the diff.
+    monkeypatch.setattr(settings, "scan_mode", "full")
+    (tmp_path / "main.tf").write_text('resource "aws_s3_bucket" "b" {}\n')
+    state = _state(tmp_path, files=[ChangedFile(path="main.tf")])
+
+    tfsec = _FakeTool(
+        [
+            Finding(agent="security", severity="high", file="main.tf", rule="tfsec:a", message="r"),
+            Finding(
+                agent="security", severity="high", file="legacy/old.tf", rule="tfsec:b", message="r"
+            ),
+        ]
+    )
+    monkeypatch.setattr(security_mod, "run_tfsec", tfsec)
+    monkeypatch.setattr(security_mod, "run_checkov", _FakeTool([]))
+    _patch_llm(monkeypatch, SpecialistAnnotations())
+
+    out = SecurityLens().run(state)
+
+    assert sorted(f.rule for f in out.findings) == ["tfsec:a", "tfsec:b"]
+
+
 def test_security_lens_discovery_off_ignores_llm_findings(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -306,7 +333,8 @@ def test_security_lens_discovery_on_post_filters_to_changed_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # With discovery enabled the LLM may add `discovered` findings; any that
-    # land outside the changed files are stripped by the post-filter.
+    # land outside the changed files are stripped by the post-filter (diff mode).
+    monkeypatch.setattr(settings, "scan_mode", "diff")
     (tmp_path / "main.tf").write_text("resource {}\n")
     monkeypatch.setattr(settings, "enable_llm_findings", True)
     state = _state(tmp_path, files=[ChangedFile(path="main.tf")])
@@ -773,7 +801,8 @@ def test_style_lens_pre_filters_unchanged_and_post_filters_discovered(
 ) -> None:
     # Pre-filter: an unchanged-file scanner finding never reaches the LLM.
     # Post-filter (discovery on): a discovered finding outside the changed files
-    # is stripped from the output.
+    # is stripped from the output. (Both are diff-mode behaviour.)
+    monkeypatch.setattr(settings, "scan_mode", "diff")
     (tmp_path / "main.tf").write_text("variable x {}\n")
     monkeypatch.setattr(settings, "enable_llm_findings", True)
     state = _state(tmp_path, files=[ChangedFile(path="main.tf")])

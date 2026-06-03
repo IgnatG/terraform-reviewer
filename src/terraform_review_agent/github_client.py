@@ -13,6 +13,8 @@ tests.
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
@@ -22,6 +24,26 @@ from terraform_review_agent.config import Settings, settings
 from terraform_review_agent.utils.state import ChangedFile, PRContext
 
 log = structlog.get_logger(__name__)
+
+# Hidden per-comment marker so re-runs don't repost the same inline comment.
+# The body carries `<!-- tra-inline:<key> -->`; a key already present on the PR
+# is skipped. Kept distinct from the sticky-comment marker.
+_INLINE_MARKER_RE = re.compile(r"<!-- tra-inline:([^\s>]+) -->")
+
+
+def inline_marker(key: str) -> str:
+    """The hidden marker embedded in an inline comment body, keyed by ``key``."""
+
+    return f"<!-- tra-inline:{key} -->"
+
+
+@dataclass(frozen=True)
+class ReviewComment:
+    """One inline review comment: a body anchored to a new-file line."""
+
+    path: str
+    line: int
+    body: str
 
 
 class _HTTPTransport(Protocol):
@@ -182,6 +204,61 @@ class GitHubClient:
         )
         return int(updated["id"])
 
+    def post_review_comments(
+        self, repository: str, pr_number: int, comments: list[ReviewComment]
+    ) -> int:
+        """Post a single PR review with one inline comment per ``ReviewComment``.
+
+        Idempotent: comments whose hidden ``tra-inline`` marker already exists on
+        the PR are skipped, so re-running on a new push doesn't duplicate them.
+        Returns the number of *new* comments posted (0 when there's nothing new).
+
+        Callers must pass only comments whose ``line`` sits on the PR diff (see
+        :func:`utils.diff.commentable_lines`); GitHub rejects the whole review
+        otherwise.
+        """
+
+        if not comments:
+            return 0
+        owner, repo = _split_repo(repository)
+        seen = self._existing_inline_markers(owner, repo, pr_number)
+        fresh = [c for c in comments if _marker_key(c.body) not in seen]
+        if not fresh:
+            log.info("no new inline comments", repo=repository, pr=pr_number)
+            return 0
+        self._request(
+            "POST",
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
+            json={
+                "event": "COMMENT",
+                "comments": [
+                    {"path": c.path, "line": c.line, "side": "RIGHT", "body": c.body} for c in fresh
+                ],
+            },
+        )
+        log.info("posted inline review comments", repo=repository, pr=pr_number, count=len(fresh))
+        return len(fresh)
+
+    def _existing_inline_markers(self, owner: str, repo: str, pr_number: int) -> set[str]:
+        """Marker keys already present on the PR's review comments (paginated)."""
+
+        seen: set[str] = set()
+        page = 1
+        while True:
+            batch = self._request(
+                "GET",
+                f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+                params={"per_page": 100, "page": page},
+            )
+            if not batch:
+                return seen
+            for comment in batch:
+                for match in _INLINE_MARKER_RE.finditer(comment.get("body") or ""):
+                    seen.add(match.group(1))
+            if len(batch) < 100:
+                return seen
+            page += 1
+
     def _find_existing_comment(self, owner: str, repo: str, pr_number: int) -> int | None:
         page = 1
         while True:
@@ -198,6 +275,13 @@ class GitHubClient:
             if len(batch) < 100:
                 return None
             page += 1
+
+
+def _marker_key(body: str) -> str | None:
+    """Extract the ``tra-inline`` marker key from a comment body, if present."""
+
+    match = _INLINE_MARKER_RE.search(body)
+    return match.group(1) if match else None
 
 
 def _normalize_status(raw: str) -> str:

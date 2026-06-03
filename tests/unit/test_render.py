@@ -196,7 +196,7 @@ def test_render_no_findings_message() -> None:
     )
 
 
-def test_render_visible_severities_are_top_level_sections() -> None:
+def test_render_sections_are_collapsible_per_severity() -> None:
     md = render_comment(
         [
             _f(severity="critical", rule="c"),
@@ -206,14 +206,17 @@ def test_render_visible_severities_are_top_level_sections() -> None:
         _pr(),
     )
 
-    assert "### 🔴 Critical (1)" in md
-    assert "### 🟠 High (1)" in md
-    assert "### 🟡 Medium (1)" in md
-    # Visible severities are not buried in a collapsed block.
-    assert "<summary>Low &amp; info" not in md
+    # Critical/high are collapsible but open (expanded) by default.
+    assert "<details open>\n<summary>🔴 Critical (1)</summary>" in md
+    assert "<details open>\n<summary>🟠 High (1)</summary>" in md
+    # Medium is collapsible and starts collapsed (no `open`).
+    assert "<details>\n<summary>🟡 Medium (1)</summary>" in md
+    # No bare markdown headings for sections anymore — the disclosure summary is
+    # the header.
+    assert "### " not in md
 
 
-def test_render_collapses_low_and_info_into_details() -> None:
+def test_render_low_and_info_are_separate_collapsed_grouped_sections() -> None:
     md = render_comment(
         [
             _f(severity="low", rule="lo", message="low item"),
@@ -222,15 +225,43 @@ def test_render_collapses_low_and_info_into_details() -> None:
         _pr(),
     )
 
-    assert "<details>" in md
-    assert "<summary>Low &amp; info (2)</summary>" in md
-    assert "#### 🔵 Low (1)" in md
-    assert "#### ⚪ Info (1)" in md
-    # Collapsed severities never appear as top-level (`### `) sections — they
-    # only show up as `#### ` sub-headers inside the details block.
-    lines = md.splitlines()
-    assert "### 🔵 Low (1)" not in lines
-    assert "### ⚪ Info (1)" not in lines
+    # Each severity is its own collapsed section (no combined "Low & info").
+    assert "<details>\n<summary>🔵 Low (1)</summary>" in md
+    assert "<details>\n<summary>⚪ Info (1)</summary>" in md
+    # Grouped table for the low-severity tail, and neither starts open.
+    assert "| Severity | Issue | Locations |" in md
+    assert "<details open>" not in md
+
+
+def test_render_groups_repeated_rule_into_one_row_with_count() -> None:
+    # The same rule firing on many lines collapses to one row with a count + the
+    # locations, instead of one near-identical row each.
+    md = render_comment(
+        [
+            _f(severity="medium", rule="tflint:dep", file="a.tf", line=1, message="deprecated"),
+            _f(severity="medium", rule="tflint:dep", file="a.tf", line=9, message="deprecated"),
+            _f(severity="medium", rule="tflint:dep", file="b.tf", line=2, message="deprecated"),
+        ],
+        _pr(),
+    )
+
+    assert "<summary>🟡 Medium (3)</summary>" in md  # true total in the summary
+    assert "**3 locations:**" in md  # one grouped row carrying the count
+    # All three locations are linked in the single row.
+    assert "a.tf#L1" in md and "a.tf#L9" in md and "b.tf#L2" in md
+    # Only one data row (header + separator + 1 row = the rule appears once).
+    assert md.count("tflint:dep") == 1
+
+
+def test_render_caps_locations_for_a_heavily_repeated_rule() -> None:
+    findings = [
+        _f(severity="low", rule="tflint:dep", file=f"f{n}.tf", line=n, message="x")
+        for n in range(1, 13)
+    ]
+    md = render_comment(findings, _pr())
+
+    assert "**12 locations:**" in md
+    assert "… +4 more" in md  # 12 locations, capped at 8
 
 
 def test_render_summarizes_counts_by_agent_without_duplicating_findings() -> None:
@@ -396,7 +427,8 @@ def test_render_full_comment_snapshot() -> None:
                 "",
                 "_By agent:_ 🔒 Security 2",
                 "",
-                "### 🔴 Critical (1)",
+                "<details open>",
+                "<summary>🔴 Critical (1)</summary>",
                 "",
                 "| Severity | Issue | Location |",
                 "|:--|:--|:--|",
@@ -404,12 +436,12 @@ def test_render_full_comment_snapshot() -> None:
                 "<sub>`tfsec:aws-s3-no-public`</sub> | "
                 "[`main.tf:10`](https://github.com/acme/example/blob/deadbeef/main.tf#L10) |",
                 "",
+                "</details>",
+                "",
                 "<details>",
-                "<summary>Low &amp; info (1)</summary>",
+                "<summary>⚪ Info (1)</summary>",
                 "",
-                "#### ⚪ Info (1)",
-                "",
-                "| Severity | Issue | Location |",
+                "| Severity | Issue | Locations |",
                 "|:--|:--|:--|",
                 "| ⚪ 🔒 | **Consider tagging** <br> <sub>`security:llm-note`</sub> | "
                 "[`variables.tf`](https://github.com/acme/example/blob/deadbeef/variables.tf) |",

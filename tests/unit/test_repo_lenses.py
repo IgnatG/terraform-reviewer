@@ -12,7 +12,7 @@ from terraform_review_agent.utils.lenses.gds import GDSLens
 from terraform_review_agent.utils.lenses.tech_debt import TechDebtLens
 from terraform_review_agent.utils.sources.jscpd import parse_jscpd
 from terraform_review_agent.utils.standardisers import load_gds_definition
-from terraform_review_agent.utils.standardisers.gds import evaluate_gds
+from terraform_review_agent.utils.standardisers.gds import GDSDefinition, GDSPoint, evaluate_gds
 from terraform_review_agent.utils.state import ChangedFile, PRContext, ReviewState
 
 
@@ -76,13 +76,29 @@ def test_a3_well_covered_file_only_scores(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert _rule(findings, "coverage:score")
 
 
-def test_a3_unchanged_file_not_flagged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_a3_unchanged_file_not_flagged_in_diff_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     # The under-covered file isn't in the PR -> no per-file finding (just score).
+    monkeypatch.setattr(settings, "scan_mode", "diff")
     report = _lcov(tmp_path, "SF:src/other.py\nDA:1,0\nDA:2,0\nend_of_record\n")
     monkeypatch.setattr(settings, "coverage_report_path", report)
     state = _state(tmp_path, ["main.tf"])
     findings = CoverageLens().run(state).findings
     assert _rule(findings, "coverage:under-covered") == []
+
+
+def test_a3_full_scan_flags_unchanged_under_covered_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Full scan (default) flags every under-covered file, not just changed ones.
+    monkeypatch.setattr(settings, "scan_mode", "full")
+    report = _lcov(tmp_path, "SF:src/other.py\nDA:1,0\nDA:2,0\nend_of_record\n")
+    monkeypatch.setattr(settings, "coverage_report_path", report)
+    state = _state(tmp_path, ["main.tf"])
+    findings = CoverageLens().run(state).findings
+    under = _rule(findings, "coverage:under-covered")
+    assert [f.file for f in under] == ["src/other.py"]
 
 
 def test_a3_gated_on_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -135,6 +151,7 @@ def test_a4_emits_duplication_finding_and_score(
 def test_a4_scopes_duplication_to_changed_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(settings, "scan_mode", "diff")
     jscpd = tmp_path / "jscpd.json"
     jscpd.write_text(
         '{"statistics":{"total":{"percentage":3.0}},"duplicates":'
@@ -182,7 +199,9 @@ def test_a3_ambiguous_basename_is_not_misattributed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Two changed files share the basename util.py; a bare "util.py" coverage
-    # entry must not be attributed to either (ambiguous -> skipped).
+    # entry must not be attributed to either (ambiguous -> skipped). Diff mode:
+    # full mode bypasses the changed-file match entirely.
+    monkeypatch.setattr(settings, "scan_mode", "diff")
     report = _lcov(tmp_path, "SF:util.py\nDA:1,0\nDA:2,0\nend_of_record\n")
     monkeypatch.setattr(settings, "coverage_report_path", report)
     state = _state(tmp_path, ["main.tf", "a/util.py", "b/util.py"])
@@ -211,12 +230,37 @@ def test_a5_reports_three_states_honestly(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert by_rule["gds:components-govuk-frontend"].severity == "info"  # met
     assert by_rule["gds:opensource-licence"].severity == "info"  # met
     assert by_rule["gds:accessibility-statement-present"].severity == "medium"  # not met
-    # Out-of-scope points are reported honestly, never faked as passing.
-    assert by_rule["gds:accessibility-wcag-rendered"].state == "human_only"
-    assert by_rule["gds:secure-secrets-in-history"].state == "evidence"
+    # The shipped def is code-evidenceable points only — no out-of-scope noise.
+    assert "gds:accessibility-wcag-rendered" not in by_rule
+    assert "gds:secure-secrets-in-history" not in by_rule
     score = by_rule["gds:score"]
     assert "3/4 code-evidenceable points met" in score.message
-    assert "3 point(s) need manual/rendered review" in score.message
+    assert "need manual/rendered review" not in score.message
+
+
+def test_a5_out_of_scope_points_still_supported_for_custom_defs(tmp_path: Path) -> None:
+    # The shipped def dropped its out-of-scope points, but a custom def may still
+    # declare them — they must be reported honestly (◐/○) and excluded from the
+    # score, which then mentions the manual-review count again.
+    definition = GDSDefinition(
+        id="custom",
+        name="Custom",
+        version="1.0.0",
+        points=[
+            GDSPoint(id="lic", title="Licence", check="file", target="LICENSE", state="verified"),
+            GDSPoint(id="a11y", title="WCAG", check="out_of_scope", state="human_only"),
+            GDSPoint(id="secrets", title="Secrets", check="out_of_scope", state="evidence"),
+        ],
+    )
+    (tmp_path / "LICENSE").write_text("MIT")
+
+    by_rule = {f.rule: f for f in evaluate_gds(tmp_path, definition)}
+
+    assert by_rule["gds:a11y"].state == "human_only"
+    assert by_rule["gds:secrets"].state == "evidence"
+    score = by_rule["gds:score"]
+    assert "1/1 code-evidenceable points met" in score.message
+    assert "2 point(s) need manual/rendered review" in score.message
 
 
 def test_a5_lens_gated_on_definition(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

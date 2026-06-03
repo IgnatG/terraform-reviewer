@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from terraform_review_agent.github_client import GitHubClient
+from terraform_review_agent.github_client import GitHubClient, ReviewComment, inline_marker
 
 MARKER = "<!-- terraform-review-agent:v1 -->"
 
@@ -234,3 +234,55 @@ def test_split_repo_validates_slug() -> None:
     tx = FakeTransport()
     with pytest.raises(ValueError):
         _client(tx).fetch_pr_context("not-a-slug", 1)
+
+
+# ---------------------------------------------------------------------------
+# inline review comments (Phase 10)
+# ---------------------------------------------------------------------------
+
+
+def test_post_review_comments_posts_new_and_skips_already_present() -> None:
+    tx = FakeTransport()
+    # keyA already exists on the PR; keyB is new.
+    tx.queue(
+        "GET",
+        "/repos/acme/example/pulls/7/comments",
+        json_body=[{"body": f"old {inline_marker('keyA')} body"}],
+    )
+    tx.queue("POST", "/repos/acme/example/pulls/7/reviews", json_body={"id": 5})
+
+    comments = [
+        ReviewComment(path="main.tf", line=1, body=f"{inline_marker('keyA')}\nA"),
+        ReviewComment(path="main.tf", line=2, body=f"{inline_marker('keyB')}\nB"),
+    ]
+    posted = _client(tx).post_review_comments("acme/example", 7, comments)
+
+    assert posted == 1  # only the new one
+    review = tx.calls[1]
+    assert review.method == "POST" and review.url.endswith("/pulls/7/reviews")
+    assert review.json["event"] == "COMMENT"
+    body_comments = review.json["comments"]
+    assert [c["line"] for c in body_comments] == [2]
+    assert body_comments[0]["side"] == "RIGHT"
+    assert body_comments[0]["path"] == "main.tf"
+    assert "keyB" in body_comments[0]["body"]
+
+
+def test_post_review_comments_noop_when_all_already_present() -> None:
+    tx = FakeTransport()
+    tx.queue(
+        "GET",
+        "/repos/acme/example/pulls/7/comments",
+        json_body=[{"body": inline_marker("keyA")}],
+    )
+    # No POST queued — if the client tried to post, FakeTransport would raise.
+    posted = _client(tx).post_review_comments(
+        "acme/example", 7, [ReviewComment(path="m.tf", line=1, body=inline_marker("keyA"))]
+    )
+    assert posted == 0
+
+
+def test_post_review_comments_empty_makes_no_requests() -> None:
+    tx = FakeTransport()
+    assert _client(tx).post_review_comments("acme/example", 7, []) == 0
+    assert tx.calls == []

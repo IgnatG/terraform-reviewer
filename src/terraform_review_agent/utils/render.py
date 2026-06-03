@@ -6,10 +6,12 @@ The aggregator collapses the three specialist branches into a single comment:
    identity, keeping the most severe instance.
 2. :func:`sort_findings` orders them by severity, then file/line, for a stable
    render (and stable test snapshots).
-3. :func:`render_comment` emits GitHub-flavored markdown: a headline 💰 cost
-   callout (absolute monthly total + the PR's delta), then findings as severity
-   tables (badge · agent | issue | location); critical/high/medium show inline,
-   ``low``/``info`` collapse into a ``<details>`` block.
+3. :func:`render_comment` emits GitHub-flavored markdown: a headline summary
+   (counts by severity + by agent) and a 💰 cost callout that stay visible, then
+   **one collapsible ``<details>`` section per severity**. ``critical``/``high``
+   open by default with one detailed row per finding; ``medium``/``low``/``info``
+   start collapsed and **group by rule** (one row + a count + the locations) so a
+   rule firing across many lines/files doesn't flood the comment.
 
 The hidden sticky marker is intentionally *not* embedded here — the GitHub
 client owns it (see :meth:`GitHubClient.upsert_sticky_comment`), so the rendered
@@ -36,9 +38,15 @@ from terraform_review_agent.utils.state import (
 _STATE_BADGE: dict[str, str] = {"verified": "✅", "evidence": "◐", "human_only": "○"}
 _STATE_ORDER: tuple[str, ...] = ("verified", "evidence", "human_only")
 
-# Severities shown inline, in display order. ``low``/``info`` are collapsed.
-VISIBLE_SEVERITIES: tuple[Severity, ...] = ("critical", "high", "medium")
-COLLAPSED_SEVERITIES: tuple[Severity, ...] = ("low", "info")
+# Each severity renders as its own collapsible <details> section. The high-impact
+# ones start expanded (``open``); the long tail starts collapsed. Critical/high
+# list one row per finding; the rest group by rule to stay compact.
+_SECTION_SEVERITIES: tuple[Severity, ...] = ("critical", "high", "medium", "low", "info")
+_OPEN_SEVERITIES: tuple[Severity, ...] = ("critical", "high")
+_GROUPED_SEVERITIES: tuple[Severity, ...] = ("medium", "low", "info")
+# Cap locations listed per grouped rule so a rule firing on hundreds of lines
+# doesn't blow up the cell; the count still reflects the true total.
+_MAX_LOCATIONS = 8
 
 _SEVERITY_LABELS: dict[Severity, str] = {
     "critical": "Critical",
@@ -248,34 +256,73 @@ def _summary_lines(findings: list[Finding]) -> list[str]:
     return lines
 
 
-def _severity_sections(pr: PRContext, findings: list[Finding]) -> list[str]:
-    parts: list[str] = []
-    for sev in VISIBLE_SEVERITIES:
-        group = [f for f in findings if f.severity == sev]
-        if not group:
-            continue
-        parts.append(f"### {_SEVERITY_EMOJI[sev]} {_SEVERITY_LABELS[sev]} ({len(group)})")
-        parts.append("")
-        parts.extend(_finding_table(pr, group))
-        parts.append("")
-    return parts
+def _grouped_table(pr: PRContext, findings: list[Finding]) -> list[str]:
+    """Render findings grouped by rule: one row per rule with a count + locations.
+
+    A rule that fires across many lines/files (e.g. a tflint deprecation or a
+    "tag every resource" rule) collapses to a single row carrying the worst
+    message + all its locations, instead of one near-identical row each. Locations
+    are capped at ``_MAX_LOCATIONS`` with a "+N more" tail; the count is the true
+    total. Preserves the (already severity-sorted) first-seen order of the rules.
+    """
+
+    groups: dict[str, list[Finding]] = {}
+    order: list[str] = []
+    for f in findings:
+        if f.rule not in groups:
+            groups[f.rule] = []
+            order.append(f.rule)
+        groups[f.rule].append(f)
+
+    rows = ["| Severity | Issue | Locations |", "|:--|:--|:--|"]
+    for rule in order:
+        group = groups[rule]
+        first = group[0]
+        badge = f"{_SEVERITY_EMOJI[first.severity]} {_AGENT_EMOJI[first.agent]}"
+        issue = f"**{_cell(first.message)}**"
+        if first.suggestion:
+            issue += f" <br> 💡 {_cell(first.suggestion)}"
+        issue += f" <br> <sub>`{_cell(_code(rule))}`</sub>"
+        links = [_file_ref(pr, f).replace("|", "\\|") for f in group]
+        shown = links[:_MAX_LOCATIONS]
+        extra = len(links) - len(shown)
+        locations = ", ".join(shown) + (f" … +{extra} more" if extra else "")
+        if len(group) > 1:
+            locations = f"**{len(group)} locations:** {locations}"
+        rows.append(f"| {badge} | {issue} | {locations} |")
+    return rows
 
 
-def _collapsed_section(pr: PRContext, findings: list[Finding]) -> list[str]:
-    group = [f for f in findings if f.severity in COLLAPSED_SEVERITIES]
+def _severity_section(pr: PRContext, findings: list[Finding], sev: Severity) -> list[str]:
+    """One collapsible <details> section for a single severity (empty if none).
+
+    Critical/high open by default and list each finding; medium/low/info start
+    collapsed and group by rule. The headline counts stay above all sections, so
+    the at-a-glance summary is always visible even with every section folded.
+    """
+
+    group = [f for f in findings if f.severity == sev]
     if not group:
         return []
-    parts = ["<details>", f"<summary>Low &amp; info ({len(group)})</summary>", ""]
-    for sev in COLLAPSED_SEVERITIES:
-        sub = [f for f in group if f.severity == sev]
-        if not sub:
-            continue
-        parts.append(f"#### {_SEVERITY_EMOJI[sev]} {_SEVERITY_LABELS[sev]} ({len(sub)})")
-        parts.append("")
-        parts.extend(_finding_table(pr, sub))
-        parts.append("")
-    parts.append("</details>")
-    parts.append("")
+    rows = _grouped_table(pr, group) if sev in _GROUPED_SEVERITIES else _finding_table(pr, group)
+    open_attr = " open" if sev in _OPEN_SEVERITIES else ""
+    return [
+        f"<details{open_attr}>",
+        f"<summary>{_SEVERITY_EMOJI[sev]} {_SEVERITY_LABELS[sev]} ({len(group)})</summary>",
+        "",
+        *rows,
+        "",
+        "</details>",
+        "",
+    ]
+
+
+def _findings_sections(pr: PRContext, findings: list[Finding]) -> list[str]:
+    """All per-severity collapsible sections, highest severity first."""
+
+    parts: list[str] = []
+    for sev in _SECTION_SEVERITIES:
+        parts.extend(_severity_section(pr, findings, sev))
     return parts
 
 
@@ -356,7 +403,6 @@ def render_comment(
     parts.extend(_cost_callout(cost_summary))
     if records is not None:
         parts.extend(_readiness_section(records))
-    parts.extend(_severity_sections(pr, ordered))
-    parts.extend(_collapsed_section(pr, ordered))
+    parts.extend(_findings_sections(pr, ordered))
 
     return "\n".join(parts).rstrip() + "\n"
