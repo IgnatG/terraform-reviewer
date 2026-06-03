@@ -57,6 +57,9 @@ class StyleLens(Lens):
         )
         if not (raw or payloads):
             return LensResult()
-        findings = annotate_with_llm("style", raw, payloads, full_review=full_review)
+        ai_errors: list[str] = []
+        findings = annotate_with_llm(
+            "style", raw, payloads, full_review=full_review, error_sink=ai_errors
+        )
         scoped = findings if full_review else filter_to_changed(findings, changed)
-        return LensResult(findings=scoped)
+        return LensResult(findings=scoped, ai_errors=ai_errors)

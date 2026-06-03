@@ -229,6 +229,11 @@ class ReviewState(BaseModel):
         description="infracost baseline JSON (base-ref breakdown); cost agent skips when unset.",
     )
     findings: Annotated[list[Finding], operator.add] = Field(default_factory=list)
+    # Human-readable AI-backend failures collected across the parallel lenses (one
+    # string per failed annotate call). Empty when the AI ran cleanly or was never
+    # configured. The entrypoint surfaces these as a GitHub annotation and, when
+    # `fail_on_ai_error` is set, fails the check on them.
+    ai_errors: Annotated[list[str], operator.add] = Field(default_factory=list)
     cost_summary: CostSummary | None = None
     comment_markdown: str | None = None
     findings_report_json: str | None = Field(

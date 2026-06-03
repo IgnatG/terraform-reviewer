@@ -35,6 +35,8 @@ class LensResult(BaseModel):
 
     findings: list[Finding] = Field(default_factory=list)
     cost_summary: CostSummary | None = None
+    #: AI-backend failures hit while annotating this lens (empty on success / no AI).
+    ai_errors: list[str] = Field(default_factory=list)
 
 
 class Lens(ABC):

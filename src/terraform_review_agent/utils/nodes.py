@@ -59,6 +59,8 @@ def lens_node(task: LensInvocation) -> dict[str, Any]:
     update: dict[str, Any] = {"findings": result.findings}
     if result.cost_summary is not None:
         update["cost_summary"] = result.cost_summary
+    if result.ai_errors:
+        update["ai_errors"] = result.ai_errors
     return update
 
 

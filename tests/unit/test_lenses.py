@@ -892,6 +892,85 @@ def test_annotate_degrades_when_backend_raises(
     assert [(f.rule, f.message, f.severity) for f in findings] == [("r", "scanner", "high")]
 
 
+def test_annotate_records_error_in_sink_on_backend_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A configured-but-failing backend must record the error so the entrypoint can
+    # surface it — while findings still degrade to the scanner set.
+    class _Flaky:
+        def available(self) -> bool:
+            return True
+
+        def annotate(self, system: str, human: str) -> Any:
+            raise RuntimeError("400 credit balance too low")
+
+    monkeypatch.setattr(_annotate, "get_ai_backend", lambda: _Flaky())
+
+    sink: list[str] = []
+    raw = [Finding(agent="security", severity="high", file="a.tf", rule="r", message="scanner")]
+    findings = _annotate.annotate_with_llm("security", raw, [], error_sink=sink)
+
+    assert [f.message for f in findings] == ["scanner"]  # degraded, not lost
+    assert len(sink) == 1
+    assert "security" in sink[0] and "credit balance" in sink[0]
+
+
+def test_annotate_no_sink_entry_when_backend_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No key / no CLI is a *choice*, not an error — the sink stays empty so an
+    # unconfigured AI never fails the check.
+    class _Unavailable:
+        def available(self) -> bool:
+            return False
+
+        def annotate(self, system: str, human: str) -> Any:
+            raise AssertionError("must not be called when unavailable")
+
+    monkeypatch.setattr(_annotate, "get_ai_backend", lambda: _Unavailable())
+
+    sink: list[str] = []
+    raw = [Finding(agent="security", severity="high", file="a.tf", rule="r", message="scanner")]
+    _annotate.annotate_with_llm("security", raw, [], error_sink=sink)
+
+    assert sink == []
+
+
+def test_security_lens_propagates_ai_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # The lens surfaces a backend failure via LensResult.ai_errors so the graph
+    # can route it to the entrypoint.
+    (tmp_path / "main.tf").write_text('resource "aws_s3_bucket" "b" {}\n')
+    state = _state(tmp_path, files=[ChangedFile(path="main.tf")])
+
+    monkeypatch.setattr(
+        security_mod,
+        "run_tfsec",
+        _FakeTool(
+            [
+                Finding(
+                    agent="security", severity="high", file="main.tf", rule="tfsec:x", message="r"
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(security_mod, "run_checkov", _FakeTool([]))
+
+    class _Flaky:
+        def available(self) -> bool:
+            return True
+
+        def annotate(self, system: str, human: str) -> Any:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(_annotate, "get_ai_backend", lambda: _Flaky())
+
+    out = SecurityLens().run(state)
+
+    assert len(out.ai_errors) == 1 and "security" in out.ai_errors[0]
+    # The finding still survives, un-reworded.
+    assert [f.rule for f in out.findings] == ["tfsec:x"]
+
+
 # ---------------------------------------------------------------------------
 # whole-codebase LLM review (PR-label trigger)
 # ---------------------------------------------------------------------------

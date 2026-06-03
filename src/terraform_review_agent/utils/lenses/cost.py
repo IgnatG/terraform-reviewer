@@ -70,5 +70,10 @@ class CostLens(Lens):
             delta_monthly=summary.delta_monthly if summary else None,
             usage_file_synced=usage_file is not None,
         )
-        findings = annotate_with_llm("cost", report.findings, payloads) if report.findings else []
-        return LensResult(findings=findings, cost_summary=summary)
+        ai_errors: list[str] = []
+        findings = (
+            annotate_with_llm("cost", report.findings, payloads, error_sink=ai_errors)
+            if report.findings
+            else []
+        )
+        return LensResult(findings=findings, cost_summary=summary, ai_errors=ai_errors)

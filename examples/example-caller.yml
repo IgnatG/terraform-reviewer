@@ -55,6 +55,9 @@ jobs:
 
       # ── CI gating & scan scope ───────────────────────────────────────────────
       fail-on-severity: high # default: none · critical|high|medium|low|info|none
+      # Fail the check when a configured AI call fails (bad key/credits/model)
+      # instead of passing green. AI failures always annotate regardless.
+      fail-on-ai-error: false # default: false
       scan-mode: full # default: full (whole-repo posture) · diff (changed files only)
       inline-comments: true # default: true · one PR comment per finding on a changed line
 

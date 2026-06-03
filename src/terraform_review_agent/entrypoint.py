@@ -39,6 +39,42 @@ log = structlog.get_logger(__name__)
 # Exit code returned when findings trip the configured `fail_on_severity` floor,
 # so consumers can gate CI on it. Distinct from 1 (unexpected error).
 GATING_EXIT_CODE = 2
+# Exit code returned when a configured AI backend failed this run and
+# `fail_on_ai_error` is set. Distinct from the severity gate (2) and errors (1).
+AI_ERROR_EXIT_CODE = 3
+
+
+def _emit_workflow_command(level: str, message: str) -> None:
+    """Write a GitHub Actions annotation (``::warning::``/``::error::``) to stdout.
+
+    This is the CLI I/O boundary, so a workflow command on stdout — not a
+    structlog line on stderr — is what GitHub renders as a visible annotation on
+    the run. Newlines are flattened so the command stays a single line.
+    """
+
+    safe = message.replace("\r", " ").replace("\n", " ")
+    sys.stdout.write(f"::{level}::{safe}\n")
+    sys.stdout.flush()
+
+
+def _surface_ai_errors(final: ReviewState) -> None:
+    """Make AI-backend failures visible as a GitHub annotation (never silent).
+
+    Always emits — a `warning` normally, escalated to `error` when
+    `fail_on_ai_error` is set (so the red check has a matching annotation). The
+    deterministic report still posted; this only reports that rewording/discovery
+    didn't run.
+    """
+
+    if not final.ai_errors:
+        return
+    log.warning("ai.errors", count=len(final.ai_errors), errors=final.ai_errors)
+    level = "error" if settings.fail_on_ai_error else "warning"
+    _emit_workflow_command(
+        level,
+        f"AI rewording/discovery failed this run ({len(final.ai_errors)} call(s)): "
+        f"{'; '.join(final.ai_errors)}. The deterministic scanner report still posted.",
+    )
 
 
 def _max_severity_finding(findings: list[Finding], threshold: FailOnSeverity) -> Finding | None:
@@ -296,6 +332,11 @@ def main(argv: list[str] | None = None) -> int:
     if final.skipped:
         return 0
 
+    # Always surface AI failures (annotation); only gate the exit code on them
+    # when the consumer opted in. Done before the severity gate so the annotation
+    # is emitted regardless of which gate (if any) fails the check.
+    _surface_ai_errors(final)
+
     gating = _max_severity_finding(final.all_findings(), settings.fail_on_severity)
     if gating is not None:
         log.warning(
@@ -306,6 +347,9 @@ def main(argv: list[str] | None = None) -> int:
             file=gating.file,
         )
         return GATING_EXIT_CODE
+    if settings.fail_on_ai_error and final.ai_errors:
+        log.warning("failing run: AI backend error and fail_on_ai_error set")
+        return AI_ERROR_EXIT_CODE
     return 0
 
 

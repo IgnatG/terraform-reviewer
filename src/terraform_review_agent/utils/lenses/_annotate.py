@@ -95,6 +95,7 @@ def annotate_with_llm(
     payloads: list[FilePayload],
     *,
     full_review: bool = False,
+    error_sink: list[str] | None = None,
 ) -> list[Finding]:
     """Reword scanner findings with the LLM, keeping the finding set deterministic.
 
@@ -104,9 +105,13 @@ def annotate_with_llm(
     the *set* of findings is identical run-to-run — only the wording varies.
     Speculative LLM-discovered findings are appended only when
     ``settings.enable_llm_findings`` is set (and never for cost). ``full_review``
-    (the PR-label whole-codebase trigger) forces discovery on for this run and
-    switches the prompts to whole-repo wording, since ``payloads`` then span the
-    whole repository rather than just the diff.
+    forces discovery on for this run and switches the prompts to whole-repo
+    wording, since ``payloads`` then span the whole repository rather than just
+    the diff.
+
+    When the AI backend is configured (a key/CLI is present) but the call fails,
+    a short error string is appended to ``error_sink`` (if given) so the caller
+    can surface it — the findings still degrade to the un-reworded scanner set.
     """
 
     canonical = [f.model_copy(update={"agent": agent}) for f in raw_findings]
@@ -129,7 +134,11 @@ def annotate_with_llm(
     except Exception as exc:
         # Graceful degradation (§9.2): an AI failure (network, CLI, parse, …)
         # never blocks the report — fall back to the un-reworded scanner findings.
+        # Record it so the entrypoint can surface the failure (annotation / red
+        # check) instead of letting it pass silently.
         log.warning("ai.annotate_failed", agent=agent, error=str(exc))
+        if error_sink is not None:
+            error_sink.append(f"{agent}: {exc}")
         return canonical
 
     by_id = {a.id: a for a in review.annotations}

@@ -14,6 +14,7 @@ import pytest
 
 from terraform_review_agent import entrypoint
 from terraform_review_agent.entrypoint import (
+    AI_ERROR_EXIT_CODE,
     GATING_EXIT_CODE,
     _ensure_workspace,
     _max_severity_finding,
@@ -41,8 +42,13 @@ def _finding(severity: str, rule: str = "r") -> Finding:
     return Finding(agent="security", severity=severity, file="main.tf", rule=rule, message="m")
 
 
-def _state(*, findings: list[Finding], skipped: bool = False) -> ReviewState:
-    return ReviewState(pr=_pr(), findings=findings, skipped=skipped)
+def _state(
+    *,
+    findings: list[Finding],
+    skipped: bool = False,
+    ai_errors: list[str] | None = None,
+) -> ReviewState:
+    return ReviewState(pr=_pr(), findings=findings, skipped=skipped, ai_errors=ai_errors or [])
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +109,59 @@ def test_main_skipped_run_never_gates(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(entrypoint.settings, "fail_on_severity", "critical")
     assert entrypoint.main(_ARGV) == 0
+
+
+# ---------------------------------------------------------------------------
+# fail-on-ai-error gate + visible annotation
+# ---------------------------------------------------------------------------
+
+
+def test_main_gates_on_ai_error_when_enabled(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A configured AI call failed and fail_on_ai_error is on → red check + an
+    # `::error::` annotation, even though no finding trips fail_on_severity.
+    monkeypatch.setattr(
+        entrypoint,
+        "run",
+        lambda *a, **k: _state(findings=[], ai_errors=["security: 400 no credit"]),
+    )
+    monkeypatch.setattr(entrypoint.settings, "fail_on_severity", "none")
+    monkeypatch.setattr(entrypoint.settings, "fail_on_ai_error", True)
+
+    assert entrypoint.main(_ARGV) == AI_ERROR_EXIT_CODE
+    out = capsys.readouterr().out
+    assert "::error::" in out
+    assert "security: 400 no credit" in out
+
+
+def test_main_ai_error_annotates_but_passes_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # AI failed but fail_on_ai_error is off → still exit 0, but the failure is
+    # surfaced as a `::warning::` annotation (never silent).
+    monkeypatch.setattr(
+        entrypoint, "run", lambda *a, **k: _state(findings=[], ai_errors=["style: timeout"])
+    )
+    monkeypatch.setattr(entrypoint.settings, "fail_on_severity", "none")
+    monkeypatch.setattr(entrypoint.settings, "fail_on_ai_error", False)
+
+    assert entrypoint.main(_ARGV) == 0
+    out = capsys.readouterr().out
+    assert "::warning::" in out
+    assert "style: timeout" in out
+
+
+def test_main_no_annotation_when_ai_ran_clean(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(entrypoint, "run", lambda *a, **k: _state(findings=[]))
+    monkeypatch.setattr(entrypoint.settings, "fail_on_severity", "none")
+    monkeypatch.setattr(entrypoint.settings, "fail_on_ai_error", True)
+
+    assert entrypoint.main(_ARGV) == 0
+    out = capsys.readouterr().out
+    assert "::warning::" not in out and "::error::" not in out
 
 
 # ---------------------------------------------------------------------------

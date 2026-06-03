@@ -147,6 +147,14 @@ class Settings(BaseSettings):
 
     fail_on_severity: FailOnSeverity = "none"
 
+    # When true, the run exits non-zero (failing the CI check) if a *configured*
+    # AI backend call failed this run — e.g. a bad key, exhausted credits, or an
+    # unsupported model. The deterministic scanner report still posts either way
+    # (graceful degradation, §9.2); this only controls whether such a failure is
+    # surfaced as a red check. Off by default so a transient LLM blip can't block
+    # PRs; AI failures are always emitted as a GitHub annotation regardless.
+    fail_on_ai_error: bool = False
+
     workspace_dir: str = "."
 
     # Where the aggregator's findings.json (the versioned output contract) is

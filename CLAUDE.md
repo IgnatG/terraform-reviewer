@@ -132,6 +132,7 @@ INFRACOST_API_KEY=
 INFRACOST_BASELINE_PATH=
 
 FAIL_ON_SEVERITY=none                # critical | high | medium | low | info | none
+FAIL_ON_AI_ERROR=false               # true = fail the check when a configured AI call errored (still posts the report)
 WORKSPACE_DIR=.                      # where the PR head is checked out
 
 # Optional observability

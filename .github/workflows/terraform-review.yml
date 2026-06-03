@@ -45,6 +45,15 @@ on:
           critical | high | medium | low | info | none. Default never fails.
         type: string
         default: none
+      fail-on-ai-error:
+        description: >-
+          Fail the check (red ✗) when a *configured* AI call failed this run —
+          bad key, exhausted credits, unsupported model. The deterministic
+          scanner report still posts either way; AI failures are always shown as
+          an annotation regardless. Off by default so a transient LLM blip can't
+          block PRs.
+        type: boolean
+        default: false
       scan-mode:
         description: >-
           "full" (default) reviews the whole repo (posture scan); "diff" scopes
@@ -149,6 +158,7 @@ jobs:
       ENABLE_LLM_FINDINGS: ${{ inputs.enable-llm-findings }}
       LLM_FULL_REVIEW: ${{ inputs.llm-full-review }}
       FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
+      FAIL_ON_AI_ERROR: ${{ inputs.fail-on-ai-error }}
       SCAN_MODE: ${{ inputs.scan-mode }}
       INLINE_COMMENTS: ${{ inputs.inline-comments }}
       # Wedge lenses (Phase 5) — off unless the caller names a definition.
