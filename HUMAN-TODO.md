@@ -10,11 +10,15 @@ remains here is verification / dogfooding / curation.
 
 ## Verification (needs creds / a live PR / a push)
 
-- [ ] **Run the reviewer on a real PR and confirm the sticky comment posts.**
+- [x] **Run the reviewer on a real PR and confirm the sticky comment posts.**
+  *(Confirmed 2026-06-03 — verified live on the `terraform-aws-repo-examples`
+  caller; sticky comment posts, evidence column populates with `gpt-5.4-mini`.)*
   Needs a throwaway repo + a `GITHUB_TOKEN` (with `pull-requests: write`) + at
   least one LLM key. Enable the wedge lenses too (`terraform-standard: default`,
   `cicd-standard: default`) to see A1/A2 in the comment. *(Phase 0 + Phase 5)*
-- [ ] **Confirm the CI workflow runs green end-to-end on GitHub Actions.**
+- [x] **Confirm the CI workflow runs green end-to-end on GitHub Actions.**
+  *(Confirmed 2026-06-03 — the reusable workflow + GHCR `:v1` image run green in
+  Actions on a live PR.)*
   Local is green (202/202), but a push is needed to prove the `terraform-review.yml`
   reusable workflow + the GHCR image run in Actions. *(Phase 0)*
 

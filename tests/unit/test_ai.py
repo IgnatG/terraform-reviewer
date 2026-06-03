@@ -233,6 +233,35 @@ def test_copilot_passes_token_via_env_not_argv(monkeypatch: pytest.MonkeyPatch) 
     assert "s3cr3t" not in " ".join(captured["cmd"])
 
 
+def test_copilot_invokes_cli_with_programmatic_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The non-interactive contract: --allow-all-tools (else the CLI blocks on a
+    # tool-confirmation prompt it can't receive and times out) + --silent + -p.
+    # Crucially NOT --allow-all-paths/--allow-all-urls/--allow-all, so the
+    # agent's filesystem and URL access stay gated.
+    monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
+    monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
+    captured: dict[str, Any] = {}
+
+    def _run(cmd: list[str], **_kw: Any) -> subprocess.CompletedProcess[str]:
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout='{"annotations": []}', stderr=""
+        )
+
+    monkeypatch.setattr(copilot_mod.subprocess, "run", _run)
+    CopilotBackend().annotate("sys", "human")
+
+    cmd = captured["cmd"]
+    assert "--allow-all-tools" in cmd
+    assert "--silent" in cmd
+    assert "--allow-all-paths" not in cmd
+    assert "--allow-all-urls" not in cmd
+    assert "--allow-all" not in cmd
+    # The prompt rides as the value of -p (last arg), not interpolated into flags.
+    assert cmd[-2] == "-p"
+    assert cmd[-1].startswith("sys\n\nhuman")
+
+
 # ---------------------------------------------------------------------------
 # AI on vs AI off — same finding set
 # ---------------------------------------------------------------------------

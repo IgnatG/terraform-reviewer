@@ -89,8 +89,24 @@ class CopilotBackend(AIBackend):
     def _invoke_cli(self, prompt: str) -> str:
         """Run the Copilot CLI once with ``prompt`` and return its stdout.
 
-        The single seam to adapt to the installed CLI: the command, the
-        single-prompt flag (``-p``), and the token env var live here.
+        The single seam to adapt to the installed CLI. The flags track the
+        current Copilot CLI's programmatic contract:
+
+        * ``-p`` runs the prompt non-interactively and exits.
+        * ``--allow-all-tools`` is *required* for programmatic use — without it
+          the CLI blocks on a per-tool confirmation it can never receive (no
+          TTY) and we'd just hit the timeout. We deliberately do **not** pass
+          ``--allow-all-paths`` / ``--allow-all-urls`` (nor the blanket
+          ``--allow-all``), so filesystem and URL access stay gated.
+        * ``--silent`` drops usage stats so stdout is only the model response.
+
+        Auth is the ``COPILOT_GITHUB_TOKEN`` env var (it outranks ``GH_TOKEN`` /
+        ``GITHUB_TOKEN``); it must be a fine-grained PAT with the "Copilot
+        Requests" permission, or an OAuth token — classic ``ghp_`` tokens are
+        rejected by the CLI.
+
+        Trust note: this drives an *agentic* CLI, a larger surface than the BYOK
+        API call. Prefer BYOK when reviewing untrusted / fork PRs.
         """
 
         binary = shutil.which(settings.copilot_cli_command)
@@ -104,7 +120,7 @@ class CopilotBackend(AIBackend):
         }
         try:
             completed = subprocess.run(
-                [binary, "-p", prompt],
+                [binary, "--allow-all-tools", "--silent", "-p", prompt],
                 capture_output=True,
                 text=True,
                 timeout=settings.copilot_timeout_seconds,

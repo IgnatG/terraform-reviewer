@@ -15,8 +15,16 @@ name: terraform-review
 on:
   workflow_call:
     inputs:
+      ai-backend:
+        description: >-
+          Which AI layer rewords findings: "byok" (default — your own provider
+          key below) or "copilot" (the bundled GitHub Copilot CLI, which reuses a
+          Copilot seat instead of a separate LLM key). "copilot" needs the
+          copilot-github-token secret and an image that ships the Copilot CLI.
+        type: string
+        default: byok
       llm-provider:
-        description: "LLM provider: openai | anthropic | google."
+        description: "LLM provider (byok only): openai | anthropic | google."
         type: string
         default: openai
       llm-model:
@@ -115,6 +123,12 @@ on:
         type: string
         default: ""
     secrets:
+      copilot-github-token:
+        description: >-
+          Used only when ai-backend is "copilot". A fine-grained PAT with the
+          "Copilot Requests" permission, or an OAuth token — classic ghp_ tokens
+          are rejected by the CLI. Ignored for byok.
+        required: false
       openai-api-key:
         required: false
       anthropic-api-key:
@@ -162,6 +176,8 @@ jobs:
 
     env:
       # Provider selection + secrets, read by config.Settings inside the image.
+      AI_BACKEND: ${{ inputs.ai-backend }}
+      COPILOT_GITHUB_TOKEN: ${{ secrets.copilot-github-token }}
       DEFAULT_LLM_PROVIDER: ${{ inputs.llm-provider }}
       DEFAULT_LLM_MODEL: ${{ inputs.llm-model }}
       ENABLE_LLM_FINDINGS: ${{ inputs.enable-llm-findings }}
