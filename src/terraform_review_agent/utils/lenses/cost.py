@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 import structlog
 
 from terraform_review_agent.config import settings
@@ -17,6 +20,24 @@ from terraform_review_agent.utils.tools import (
 )
 
 log = structlog.get_logger(__name__)
+
+
+def _cleanup_scratch(file_path: str | None, dir_prefix: str) -> None:
+    """Remove the throwaway scratch dir holding ``file_path``, if we created it.
+
+    ``build_synced_usage_file`` / ``build_infracost_baseline`` write into
+    ``mkdtemp`` dirs (``tfr-usage-*`` / ``tfr-cost-*``). They're consumed by the
+    infracost diff and then dead weight, so we delete them after the run rather
+    than leaking one per review on a long-lived runner. The ``dir_prefix`` guard
+    means we only ever remove a dir we own — never a CI-injected baseline path or
+    anything else that happens to be passed in.
+    """
+
+    if not file_path:
+        return
+    parent = Path(file_path).parent
+    if parent.name.startswith(dir_prefix) and parent.is_dir():
+        shutil.rmtree(parent, ignore_errors=True)
 
 
 class CostLens(Lens):
@@ -47,10 +68,17 @@ class CostLens(Lens):
         # prices the workspace on disk and doesn't need the LLM payloads.
         payloads = prepare_file_payloads(state.pr, state.workspace)
         usage_file = build_synced_usage_file(state.workspace)
+        generated_baseline: str | None = None
         try:
-            baseline = state.cost_baseline_path or build_infracost_baseline(
-                state.workspace, state.pr.repository, usage_file_path=usage_file
-            )
+            if state.cost_baseline_path:
+                baseline = state.cost_baseline_path
+            else:
+                # No CI-injected baseline → build one in a scratch dir we own and
+                # clean up in `finally`.
+                baseline = build_infracost_baseline(
+                    state.workspace, state.pr.repository, usage_file_path=usage_file
+                )
+                generated_baseline = baseline
             result = run_infracost_diff.invoke(
                 {
                     "working_dir": state.workspace,
@@ -61,6 +89,11 @@ class CostLens(Lens):
         except ScannerError as exc:
             log.warning("scanner.skipped", scanner="infracost", error=str(exc))
             return LensResult()
+        finally:
+            # The synced usage file + any baseline we generated live in throwaway
+            # mkdtemp dirs; remove them so repeated runs don't accumulate scratch.
+            _cleanup_scratch(usage_file, "tfr-usage-")
+            _cleanup_scratch(generated_baseline, "tfr-cost-")
 
         report = result if isinstance(result, CostReport) else CostReport.model_validate(result)
         summary = report.summary

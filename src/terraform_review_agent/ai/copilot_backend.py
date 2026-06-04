@@ -31,6 +31,8 @@ import importlib.util
 import shutil
 from typing import Any, NamedTuple
 
+from pydantic import ValidationError
+
 from terraform_review_agent.ai.base import AIBackend
 from terraform_review_agent.config import settings
 from terraform_review_agent.utils.state import SpecialistAnnotations
@@ -151,7 +153,13 @@ class CopilotBackend(AIBackend):
             # way to see what came back without a live re-run.
             snippet = raw.strip()[:400] or "<empty>"
             raise CopilotError(f"Copilot SDK returned no JSON object (raw reply: {snippet!r})")
-        return SpecialistAnnotations.model_validate_json(payload)
+        try:
+            return SpecialistAnnotations.model_validate_json(payload)
+        except ValidationError as exc:
+            # A balanced-but-malformed object (wrong shape/types) is still a
+            # Copilot failure — wrap it so the contract ("every failure raises
+            # CopilotError") holds and the caller degrades gracefully.
+            raise CopilotError(f"Copilot SDK returned malformed JSON: {exc}") from exc
 
     def _invoke(self, prompt: str) -> str:
         """Run the one-shot SDK round-trip synchronously, returning the reply text.
@@ -187,12 +195,19 @@ class CopilotBackend(AIBackend):
         the completed message and fall back to the joined deltas. A
         ``SessionErrorData`` (bad model id, auth, model failure) is raised rather
         than silently yielding an empty reply.
+
+        The timeout wraps the *whole* exchange — opening the session, sending the
+        prompt, and waiting for the reply — so a CLI that hangs while creating the
+        session or accepting the prompt is bounded too, not only one that stalls
+        after ``send``. On timeout the cancelled ``async with`` unwinds the
+        client/session, which is the SDK's cleanup path for the child process.
         """
 
         sdk = _load_sdk()
         token = settings.copilot_github_token
         if token is None:
             raise CopilotError("COPILOT_GITHUB_TOKEN is not set")
+        secret = token.get_secret_value()
 
         connection = sdk.RuntimeConnection.for_stdio(
             path=shutil.which(settings.copilot_cli_command)
@@ -214,18 +229,19 @@ class CopilotBackend(AIBackend):
             elif isinstance(data, sdk.SessionIdleData):
                 done.set()
 
-        async with (
-            sdk.CopilotClient(
-                github_token=token.get_secret_value(), connection=connection
-            ) as client,
-            await client.create_session(
-                on_permission_request=sdk.PermissionHandler.approve_all,
-                model=settings.default_llm_model,
-            ) as session,
-        ):
-            session.on(on_event)
-            await session.send(prompt)
-            await asyncio.wait_for(done.wait(), timeout=settings.copilot_timeout_seconds)
+        async def _exchange() -> None:
+            async with (
+                sdk.CopilotClient(github_token=secret, connection=connection) as client,
+                await client.create_session(
+                    on_permission_request=sdk.PermissionHandler.approve_all,
+                    model=settings.default_llm_model,
+                ) as session,
+            ):
+                session.on(on_event)
+                await session.send(prompt)
+                await done.wait()
+
+        await asyncio.wait_for(_exchange(), timeout=settings.copilot_timeout_seconds)
 
         if errors:
             raise CopilotError(f"Copilot session error: {errors[0]}")

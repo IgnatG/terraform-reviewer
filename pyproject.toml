@@ -63,7 +63,7 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 # `x` (U+00D7) is intentional in the rendered PR comment's "xN" repeat badge;
 # allow it past the confusable-character check (RUF001/RUF002/RUF003).
-allowed-confusables = ["x"]
+allowed-confusables = ["×"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]

@@ -43,22 +43,34 @@ RUN apt-get update \
 WORKDIR /tmp/dl
 RUN mkdir -p /out
 
-# terraform
-RUN curl -fsSL -o terraform.zip \
+# terraform — verified against HashiCorp's published SHA256SUMS (download named
+# canonically so `sha256sum -c` matches the checksum line; empty grep => no
+# matching line => sha256sum fails the build, so verification is fail-closed).
+RUN curl -fsSL -o "terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip" \
       "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip" \
-    && unzip -q terraform.zip terraform -d /out
+    && curl -fsSL -o terraform_SHA256SUMS \
+      "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_SHA256SUMS" \
+    && grep "  terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip$" terraform_SHA256SUMS \
+       | sha256sum -c - \
+    && unzip -q "terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip" terraform -d /out
 
-# tfsec (release asset is the raw binary)
+# tfsec (release asset is the raw binary). tfsec is EOL (folded into trivy) and
+# its release checksum-file naming isn't pinned here, so it relies on TLS + the
+# execute-check below rather than a sha256 verify (unlike terraform/tflint/trivy).
 RUN curl -fsSL -o /out/tfsec \
       "https://github.com/aquasecurity/tfsec/releases/download/v${TFSEC_VERSION}/tfsec-linux-${TARGETARCH}" \
     && chmod +x /out/tfsec
 
-# tflint
-RUN curl -fsSL -o tflint.zip \
+# tflint — verified against the release's checksums.txt.
+RUN curl -fsSL -o "tflint_linux_${TARGETARCH}.zip" \
       "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${TARGETARCH}.zip" \
-    && unzip -q tflint.zip tflint -d /out
+    && curl -fsSL -o tflint_checksums.txt \
+      "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/checksums.txt" \
+    && grep "  tflint_linux_${TARGETARCH}.zip$" tflint_checksums.txt | sha256sum -c - \
+    && unzip -q "tflint_linux_${TARGETARCH}.zip" tflint -d /out
 
-# infracost (tarball contains infracost-linux-<arch>)
+# infracost (tarball contains infracost-linux-<arch>). Relies on TLS + the
+# execute-check below; its checksum-asset naming isn't pinned here.
 RUN curl -fsSL -o infracost.tar.gz \
       "https://github.com/infracost/infracost/releases/download/v${INFRACOST_VERSION}/infracost-linux-${TARGETARCH}.tar.gz" \
     && tar -xzf infracost.tar.gz \
@@ -70,9 +82,12 @@ RUN case "${TARGETARCH}" in \
       arm64) TV_ARCH=ARM64 ;; \
       *) echo "unsupported TARGETARCH for trivy: ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
-    && curl -fsSL -o trivy.tar.gz \
+    && curl -fsSL -o "trivy_${TRIVY_VERSION}_Linux-${TV_ARCH}.tar.gz" \
       "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TV_ARCH}.tar.gz" \
-    && tar -xzf trivy.tar.gz trivy \
+    && curl -fsSL -o trivy_checksums.txt \
+      "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" \
+    && grep "  trivy_${TRIVY_VERSION}_Linux-${TV_ARCH}.tar.gz$" trivy_checksums.txt | sha256sum -c - \
+    && tar -xzf "trivy_${TRIVY_VERSION}_Linux-${TV_ARCH}.tar.gz" trivy \
     && mv trivy /out/trivy
 
 # Fail the build immediately if any downloaded binary can't execute on the

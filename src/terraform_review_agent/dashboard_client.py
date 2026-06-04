@@ -86,8 +86,12 @@ class DashboardClient:
     def post_report(self, report: FindingsReport) -> bool:
         """POST ``report`` to the ingest endpoint. Returns success; never raises.
 
-        Any failure (connection, timeout, non-2xx) is logged and swallowed so a
-        dashboard outage can't fail the scan or block the PR comment.
+        Any failure is logged and swallowed so a dashboard outage can't fail the
+        scan or block the PR comment. The broad ``Exception`` catch is deliberate:
+        besides ``httpx`` transport errors (connection, timeout, non-2xx), the
+        ``model_dump`` serialization or a malformed ingest URL can raise other
+        exception types, and the contract here is *never raises* — so everything
+        degrades to a logged ``False`` rather than propagating.
         """
 
         scan = report.scan
@@ -96,7 +100,7 @@ class DashboardClient:
                 "POST", self._ingest_url, json=report.model_dump(mode="json")
             )
             response.raise_for_status()
-        except httpx.HTTPError as exc:
+        except Exception as exc:
             log.warning(
                 "dashboard ingest failed; continuing",
                 repo=scan.repository,

@@ -102,14 +102,13 @@ ENABLED_LENSES=                      # CSV of lens ids to run; empty = all (secu
 PROWLER_SARIF_PATH=
 TRIVY_SARIF_PATH=
 MEGALINTER_SARIF_PATH=
-COVERAGE_REPORT_PATH=                 # lcov/cobertura/jacoco, for the A3 lens
 ENABLED_RULE_PACKS=                   # empty=none · "*"=all · CSV of pack ids (e.g. terraform-cis-aws)
 RULE_PACKS_DIR=                       # optional dir of extra/custom rule packs
 # Wedge lenses (A1/A2): empty=off · "default"=built-in golden def · a path=custom JSON
 TERRAFORM_STANDARD=                   # A1 Terraform Standardiser (golden module structure)
 CICD_STANDARD=                        # A2 CI/CD Standardiser (.github/workflows posture)
 # A3/A4 repo-lens signals (each off when unset)
-COVERAGE_REPORT_PATH=                 # A3 (COVERAGE_MIN_PERCENT defaults to 80)
+COVERAGE_REPORT_PATH=                 # A3 lcov/cobertura/jacoco (COVERAGE_MIN_PERCENT defaults to 80)
 JSCPD_REPORT_PATH=                    # A4 duplication · SONARQUBE_SARIF_PATH for Sonar issues
 # Phase 8 outputs (all written each run; CI uploads them)
 SARIF_OUTPUT_PATH=./findings.sarif    # also EVIDENCE_HTML_PATH / EVIDENCE_CSV_PATH

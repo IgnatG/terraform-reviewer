@@ -203,6 +203,25 @@ def test_a2_multiple_unpinned_actions_do_not_collapse(tmp_path: Path) -> None:
     assert len({f.rule for f in unpinned}) == 2
 
 
+def test_a2_flags_unpinned_job_level_reusable_workflow(tmp_path: Path) -> None:
+    # Regression: a reusable-workflow call lives at `jobs.<job>.uses` (no steps),
+    # not under steps[]. An unpinned ref there must still be flagged.
+    _write_workflow(
+        tmp_path,
+        "deploy.yml",
+        "on: push\npermissions:\n  contents: read\n"
+        "jobs:\n"
+        "  call-pinned:\n    uses: org/repo/.github/workflows/x.yml@" + "a" * 40 + "\n"
+        "  call-unpinned:\n    uses: org/repo/.github/workflows/y.yml@v2\n",
+    )
+    findings = check_workflows(tmp_path, _baseline())
+    unpinned = _by_rule_prefix(findings, "ci-baseline:unpinned-action")
+
+    # Only the @v2 reusable-workflow call is flagged; the SHA-pinned one is fine.
+    assert len(unpinned) == 1
+    assert "org/repo/.github/workflows/y.yml" in unpinned[0].message
+
+
 def test_a2_malformed_workflow_skipped_not_fatal(tmp_path: Path) -> None:
     _write_workflow(tmp_path, "broken.yml", "this: : : not valid yaml\n  - [")
     # No parseable workflow -> no findings, no crash.

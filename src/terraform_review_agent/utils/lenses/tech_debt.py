@@ -106,8 +106,11 @@ class TechDebtLens(Lens):
             Finding(
                 agent="tech-debt",
                 lens="A4",
+                # Repo-level scorecard: anchored at the repo root (".") rather than
+                # an arbitrary changed file, so it isn't posted inline on an
+                # unrelated file's line.
                 severity="info",
-                file=sorted(changed)[0] if changed else ".",
+                file=".",
                 rule="tech-debt:score",
                 message="Tech-debt scorecard: " + ", ".join(parts) + ".",
             )

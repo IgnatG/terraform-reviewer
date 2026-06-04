@@ -35,16 +35,21 @@ def _severity_for(percent: float, threshold: float) -> Severity:
 def _match(changed: set[str], cov_path: str) -> str | None:
     """Return the changed-file path a coverage entry refers to, or None.
 
-    Coverage tools report paths relative to their own root, which may differ
-    from the PR's repo-relative paths. An exact match wins; otherwise a suffix
-    overlap counts only when it's *unambiguous* — if several changed files could
-    be the same basename (``a/util.py`` vs ``b/util.py``), we skip rather than
-    guess (and iterate sorted, so the decision is deterministic).
+    Coverage tools report paths relative to their own root, which may sit in a
+    subdirectory of the repo — so a coverage entry (``util.py``) can be a suffix
+    of the PR's repo-relative path (``src/util.py``). An exact match wins;
+    otherwise the coverage path must be a *trailing segment* of exactly one
+    changed file. The match is one-directional on purpose: attributing a *longer*
+    coverage path (``vendor/lib/util.py``) to a shorter changed file would
+    mis-credit unrelated code, so that direction is not matched. Ambiguous
+    basenames (``a/util.py`` vs ``b/util.py`` for a bare ``util.py``) are skipped
+    rather than guessed, and the candidates are sorted so the decision is
+    deterministic.
     """
 
     if cov_path in changed:
         return cov_path
-    suffix = sorted(c for c in changed if c.endswith("/" + cov_path) or cov_path.endswith("/" + c))
+    suffix = sorted(c for c in changed if c.endswith("/" + cov_path))
     return suffix[0] if len(suffix) == 1 else None
 
 
@@ -109,8 +114,11 @@ class CoverageLens(Lens):
             Finding(
                 agent="coverage",
                 lens="A3",
+                # Repo-level posture score: anchored at the repo root (".") rather
+                # than an arbitrary changed file, so it isn't posted as an inline
+                # comment on an unrelated file's line.
                 severity="info",
-                file=sorted(changed)[0] if changed else ".",
+                file=".",
                 rule="coverage:score",
                 message=(
                     f"Line coverage: {report.percent:.0f}% "

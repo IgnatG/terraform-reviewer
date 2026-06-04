@@ -76,7 +76,12 @@ def _triggers(doc: dict[object, object]) -> set[str]:
 
 
 def _iter_uses(doc: dict[object, object]) -> Iterator[str]:
-    """Every step's ``uses`` value across all jobs in a workflow doc."""
+    """Every ``uses`` reference in a workflow doc — step *and* job level.
+
+    Steps reference actions via ``jobs.<job>.steps[].uses``; a job can also call a
+    reusable workflow directly via ``jobs.<job>.uses`` (no ``steps``). Both are
+    third-party refs that should be SHA-pinned, so both are surfaced here.
+    """
 
     jobs = doc.get("jobs")
     if not isinstance(jobs, dict):
@@ -84,6 +89,10 @@ def _iter_uses(doc: dict[object, object]) -> Iterator[str]:
     for job in jobs.values():
         if not isinstance(job, dict):
             continue
+        # Reusable-workflow call: `jobs.<job>.uses: org/repo/.github/workflows/x.yml@ref`.
+        job_uses = job.get("uses")
+        if isinstance(job_uses, str):
+            yield job_uses
         steps = job.get("steps")
         if not isinstance(steps, list):
             continue

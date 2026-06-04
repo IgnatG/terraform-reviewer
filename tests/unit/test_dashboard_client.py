@@ -14,7 +14,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-import pytest
 
 from terraform_review_agent.config import Settings
 from terraform_review_agent.dashboard_client import DashboardClient
@@ -116,8 +115,10 @@ def test_post_report_swallows_connection_error() -> None:
     assert ok is False  # transport failure logged, not raised
 
 
-def test_post_report_propagates_non_http_errors() -> None:
-    # Only httpx failures are best-effort; a programming bug must surface.
+def test_post_report_swallows_unexpected_errors() -> None:
+    # "Never raises" is the contract (same graceful-degradation rule as the AI
+    # backend): even a non-httpx failure — a bad ingest URL, a serialization
+    # error — is logged and degrades to False rather than failing the scan.
     tx = FakeTransport(raise_exc=ValueError("unexpected"))
-    with pytest.raises(ValueError):
-        DashboardClient(ingest_url=INGEST, transport=tx).post_report(_report())
+    ok = DashboardClient(ingest_url=INGEST, transport=tx).post_report(_report())
+    assert ok is False

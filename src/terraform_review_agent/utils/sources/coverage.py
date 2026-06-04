@@ -107,24 +107,42 @@ def _strip_ns(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+def _coverage_from_line_hits(path: str, hits_by_line: dict[int, int]) -> FileCoverage:
+    """Build a :class:`FileCoverage` from a ``{line_number: max_hits}`` map.
+
+    Each line is counted once (the map is keyed by line number), so a line that
+    appeared in several ``<class>`` blocks doesn't inflate the totals.
+    """
+
+    covered = sum(1 for hits in hits_by_line.values() if hits > 0)
+    uncovered = sorted(n for n, hits in hits_by_line.items() if hits <= 0)
+    return FileCoverage(
+        path=path,
+        covered_lines=covered,
+        total_lines=len(hits_by_line),
+        uncovered_lines=uncovered,
+    )
+
+
 def parse_cobertura(xml_text: str) -> CoverageReport:
     """Parse Cobertura XML (``<class filename=…><lines><line number= hits=/>``).
 
-    A file may appear as several ``<class>`` elements (e.g. per Python class);
-    their lines are merged so each path is reported once.
+    A file may appear as several ``<class>`` elements (e.g. per Python class), and
+    a single line number may even repeat across them. Lines are merged *by number*
+    — counted once per path and treated as covered if any occurrence recorded a
+    hit — so the percentage isn't inflated by double-counting a shared line.
     """
 
     root = ET.fromstring(xml_text)
-    by_path: dict[str, FileCoverage] = {}
+    # path -> {line_number: max hit count seen across every <class> for that path}
+    by_path: dict[str, dict[int, int]] = {}
     for class_el in root.iter():
         if _strip_ns(class_el.tag) != "class":
             continue
         filename = class_el.get("filename")
         if not filename:
             continue
-        fc = by_path.setdefault(
-            Path(filename).as_posix(), FileCoverage(path=Path(filename).as_posix())
-        )
+        lines = by_path.setdefault(Path(filename).as_posix(), {})
         for lines_el in class_el:
             if _strip_ns(lines_el.tag) != "lines":
                 continue
@@ -136,23 +154,24 @@ def parse_cobertura(xml_text: str) -> CoverageReport:
                     hits = int(line_el.get("hits", "0"))
                 except ValueError:
                     continue
-                fc.total_lines += 1
-                if hits > 0:
-                    fc.covered_lines += 1
-                else:
-                    fc.uncovered_lines.append(lineno)
-    return CoverageReport(files=list(by_path.values()))
+                lines[lineno] = max(lines.get(lineno, 0), hits)
+    return CoverageReport(
+        files=[_coverage_from_line_hits(path, lines) for path, lines in by_path.items()]
+    )
 
 
 def parse_jacoco(xml_text: str) -> CoverageReport:
     """Parse JaCoCo XML (``<sourcefile><counter type="LINE" missed= covered=/>``).
 
     JaCoCo reports per-file LINE counters but not per-line hit data, so
-    ``uncovered_lines`` is left empty.
+    ``uncovered_lines`` is left empty. A path that appears in more than one
+    ``<sourcefile>`` (multi-module aggregate reports) has its counters summed so
+    each path is reported once rather than as duplicate rows.
     """
 
     root = ET.fromstring(xml_text)
-    files: list[FileCoverage] = []
+    # path -> [covered, total] summed across every <sourcefile> for that path.
+    by_path: dict[str, list[int]] = {}
     for package in root.iter():
         if _strip_ns(package.tag) != "package":
             continue
@@ -172,15 +191,16 @@ def parse_jacoco(xml_text: str) -> CoverageReport:
                     covered = int(counter.get("covered", "0"))
                 except ValueError:
                     continue
-                files.append(
-                    FileCoverage(
-                        path=path,
-                        covered_lines=covered,
-                        total_lines=missed + covered,
-                    )
-                )
+                acc = by_path.setdefault(path, [0, 0])
+                acc[0] += covered
+                acc[1] += missed + covered
                 break
-    return CoverageReport(files=files)
+    return CoverageReport(
+        files=[
+            FileCoverage(path=path, covered_lines=cov, total_lines=tot)
+            for path, (cov, tot) in by_path.items()
+        ]
+    )
 
 
 def parse_coverage_file(path: str | Path) -> CoverageReport:

@@ -84,6 +84,65 @@ def test_parse_cobertura_merges_classes_per_file() -> None:
     assert sorted(f.uncovered_lines) == [2, 10]
 
 
+_COBERTURA_REPEATED_LINE = """\
+<?xml version="1.0"?>
+<coverage>
+  <packages><package name="app"><classes>
+    <class filename="src/app.py">
+      <lines>
+        <line number="1" hits="0"/>
+        <line number="2" hits="5"/>
+      </lines>
+    </class>
+    <class filename="src/app.py">
+      <lines>
+        <line number="1" hits="4"/>
+        <line number="3" hits="0"/>
+      </lines>
+    </class>
+  </classes></package></packages>
+</coverage>
+"""
+
+_JACOCO_MULTI_MODULE = """\
+<?xml version="1.0"?>
+<report name="app">
+  <package name="com/example">
+    <sourcefile name="App.java">
+      <counter type="LINE" missed="2" covered="8"/>
+    </sourcefile>
+  </package>
+  <package name="com/example">
+    <sourcefile name="App.java">
+      <counter type="LINE" missed="0" covered="5"/>
+    </sourcefile>
+  </package>
+</report>
+"""
+
+
+def test_parse_cobertura_counts_repeated_line_once() -> None:
+    # Regression: a line number repeated across <class> blocks must be counted
+    # once (not double-counted), and covered if *any* occurrence recorded a hit.
+    report = parse_cobertura(_COBERTURA_REPEATED_LINE)
+    assert len(report.files) == 1
+    f = report.files[0]
+    # Distinct lines: 1 (hit in the 2nd block), 2 (hit), 3 (missed) -> 3 total.
+    assert (f.covered_lines, f.total_lines) == (2, 3)
+    assert f.uncovered_lines == [3]
+
+
+def test_parse_jacoco_merges_sourcefile_per_path() -> None:
+    # Regression: a path appearing in two <sourcefile> entries (multi-module
+    # aggregate) is reported once, with its LINE counters summed.
+    report = parse_jacoco(_JACOCO_MULTI_MODULE)
+    assert len(report.files) == 1
+    f = report.files[0]
+    assert f.path == "com/example/App.java"
+    # 8+5 covered of (2+8)+(0+5) total = 13/15.
+    assert (f.covered_lines, f.total_lines) == (13, 15)
+
+
 def test_parse_jacoco_uses_line_counter() -> None:
     report = parse_jacoco(_JACOCO)
     assert len(report.files) == 1

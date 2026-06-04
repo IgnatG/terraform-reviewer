@@ -712,6 +712,59 @@ def test_cost_lens_discovery_flag_never_invents_cost_findings(
     assert [f.rule for f in out.findings] == ["infracost:resource-delta"]
 
 
+def test_cleanup_scratch_removes_owned_dir_only(tmp_path: Path) -> None:
+    # A scratch dir we own (tfr-cost-* prefix) is removed; a dir we don't own
+    # (different prefix — e.g. a CI-injected baseline) is left untouched.
+    owned = tmp_path / "tfr-cost-abc"
+    owned.mkdir()
+    (owned / "infracost-base.json").write_text("{}")
+    cost_mod._cleanup_scratch(str(owned / "infracost-base.json"), "tfr-cost-")
+    assert not owned.exists()
+
+    foreign = tmp_path / "ci-baseline"
+    foreign.mkdir()
+    (foreign / "baseline.json").write_text("{}")
+    cost_mod._cleanup_scratch(str(foreign / "baseline.json"), "tfr-cost-")
+    assert foreign.exists()  # prefix mismatch -> never deleted
+
+    cost_mod._cleanup_scratch(None, "tfr-cost-")  # no-op, no crash
+
+
+def test_cost_lens_cleans_up_generated_baseline_and_usage_scratch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # End-to-end: the lens removes the usage + generated-baseline scratch dirs it
+    # created, even though their paths flow through the infracost call.
+    monkeypatch.setattr(settings, "infracost_api_key", SecretStr("k"))
+    _forbid_llm(monkeypatch)
+    (tmp_path / "main.tf").write_text('resource "aws_instance" "w" {}\n')
+
+    usage_dir = tmp_path / "tfr-usage-x"
+    usage_dir.mkdir()
+    usage_file = usage_dir / "infracost-usage.yml"
+    usage_file.write_text("version: 0.1\n")
+    base_dir = tmp_path / "tfr-cost-y"
+    base_dir.mkdir()
+    base_file = base_dir / "infracost-base.json"
+    base_file.write_text("{}")
+
+    monkeypatch.setattr(cost_mod, "build_synced_usage_file", lambda _wd: str(usage_file))
+    monkeypatch.setattr(
+        cost_mod, "build_infracost_baseline", lambda wd, name, usage_file_path=None: str(base_file)
+    )
+    summary = CostSummary(total_monthly=1.0, delta_monthly=0.0)
+    monkeypatch.setattr(
+        cost_mod, "run_infracost_diff", _FakeTool(CostReport(findings=[], summary=summary))
+    )
+    # No CI baseline -> the lens generates (and must clean) its own.
+    state = _state(tmp_path, files=[ChangedFile(path="main.tf")], baseline=None)
+
+    CostLens().run(state)
+
+    assert not usage_dir.exists()
+    assert not base_dir.exists()
+
+
 def test_cost_lens_tolerates_infracost_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -852,6 +905,48 @@ def test_style_lens_pre_filters_unchanged_and_post_filters_discovered(
 # ---------------------------------------------------------------------------
 # graceful degradation
 # ---------------------------------------------------------------------------
+
+
+def test_annotate_only_rewrites_message_and_suggestion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The trust boundary, behaviourally: even a fully-populated annotation only
+    # moves message/suggestion. severity/file/line/rule/state stay exactly as the
+    # scanner reported — the AI cannot move a verdict (the FindingAnnotation type
+    # has no field for it, and the wiring only reads message/suggestion by id).
+    canonical = Finding(
+        agent="security",
+        lens=None,
+        severity="critical",
+        file="main.tf",
+        line=42,
+        rule="tfsec:AVD-AWS-0001",
+        message="scanner message",
+        suggestion="scanner fix",
+        state="verified",
+    )
+    backend = _FakeBackend(
+        SpecialistAnnotations(
+            annotations=[FindingAnnotation(id=0, message="reworded", suggestion="nicer fix")]
+        )
+    )
+    monkeypatch.setattr(_annotate, "get_ai_backend", lambda: backend)
+
+    out = _annotate.annotate_with_llm("security", [canonical], [])
+
+    assert len(out) == 1
+    f = out[0]
+    # Only the prose moved.
+    assert f.message == "reworded"
+    assert f.suggestion == "nicer fix"
+    # Everything that constitutes the verdict is byte-for-byte preserved.
+    assert (f.severity, f.file, f.line, f.rule, f.state) == (
+        "critical",
+        "main.tf",
+        42,
+        "tfsec:AVD-AWS-0001",
+        "verified",
+    )
 
 
 def test_annotate_degrades_when_backend_unavailable(

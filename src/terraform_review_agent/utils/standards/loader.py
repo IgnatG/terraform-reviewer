@@ -95,4 +95,15 @@ def load_active_packs() -> list[RulePack]:
     if raw == "*":
         return packs
     ids = {part.strip() for part in raw.split(",") if part.strip()}
-    return [p for p in packs if p.id in ids]
+    active = [p for p in packs if p.id in ids]
+    # A requested id that matches no discovered pack is almost always a typo or a
+    # missing custom pack — and silently resolves to "inert", indistinguishable
+    # from the off state. Warn so the misconfiguration is visible.
+    unmatched = sorted(ids - {p.id for p in active})
+    if unmatched:
+        log.warning(
+            "rule_pack.unknown_id",
+            requested=unmatched,
+            available=sorted(p.id for p in packs),
+        )
+    return active

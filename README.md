@@ -355,6 +355,14 @@ be safe; the notes below matter most when reviewing **fork** PRs.
 - **No secret scanning on purpose.** A secrets scanner surfaces credential
   *values* as findings, which would then flow into the LLM rewording step — so
   it's deliberately excluded.
+- **The Copilot backend (`ai-backend: copilot`) is an agentic surface — prefer
+  BYOK for untrusted/fork PRs.** The reword-only guardrail (a narrow
+  `SpecialistAnnotations` return type) means the AI can't change a verdict
+  regardless of backend. But the Copilot CLI runs as an *agent* with its tools
+  auto-approved, and the PR diff is folded into its prompt, so a crafted diff
+  could attempt prompt-injection of the session's *actions* (not the findings).
+  BYOK (a plain chat completion) has no such tool surface and is the tested
+  default; use it when the PR author isn't trusted.
 - **AI is fail-safe.** A missing/broken AI backend never blocks the run; the
   deterministic scanner report still posts (and `fail-on-ai-error` can surface the
   failure as a red check).

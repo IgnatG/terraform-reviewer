@@ -295,6 +295,20 @@ def test_copilot_annotate_raises_on_no_json(monkeypatch: pytest.MonkeyPatch) -> 
         CopilotBackend().annotate("sys", "human")
 
 
+def test_copilot_annotate_raises_on_malformed_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A balanced-but-wrong-shape JSON object must surface as CopilotError (not a
+    # raw pydantic ValidationError), so the caller degrades gracefully and the
+    # "every failure raises CopilotError" contract holds.
+    monkeypatch.setattr(copilot_mod.shutil, "which", lambda _b: "/usr/bin/copilot")
+    monkeypatch.setattr(settings, "copilot_github_token", SecretStr("tok"))
+    _install_fake_sdk(
+        monkeypatch,
+        response_events=[_FakeAssistantMessage('{"annotations": "not-a-list"}'), _FakeIdle()],
+    )
+    with pytest.raises(CopilotError, match="malformed JSON"):
+        CopilotBackend().annotate("sys", "human")
+
+
 def test_copilot_annotate_raises_on_session_error(monkeypatch: pytest.MonkeyPatch) -> None:
     # A model/auth failure arrives as SessionErrorData — surface it instead of
     # silently returning an empty (→ "no JSON") reply.

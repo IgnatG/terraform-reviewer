@@ -8,9 +8,25 @@ override provider, model, and temperature.
 
 from __future__ import annotations
 
+import re
+from typing import Any
+
 from langchain_core.language_models import BaseChatModel
 
 from terraform_review_agent.config import LLMProvider, settings
+
+# OpenAI/Azure *reasoning* models (gpt-5 family + the o-series) reject the
+# `temperature`/`seed` knobs this agent normally sets for determinism — sending
+# them returns a 400. We detect those ids and omit both kwargs so the call
+# succeeds (the model uses its own fixed sampling). Non-reasoning models
+# (gpt-4.1, gpt-4o, …) still get temperature + seed.
+_OPENAI_REASONING_RE = re.compile(r"^(?:gpt-5|o[1-9])", re.IGNORECASE)
+
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    """True for OpenAI reasoning models that reject ``temperature``/``seed``."""
+
+    return bool(_OPENAI_REASONING_RE.match(model.strip()))
 
 
 def get_llm(
@@ -48,12 +64,12 @@ def get_llm(
     if chosen_provider == "openai":
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(
-            model=chosen_model,
-            temperature=chosen_temperature,
-            api_key=api_key,
-            seed=chosen_seed,
-        )
+        openai_kwargs: dict[str, Any] = {"model": chosen_model, "api_key": api_key}
+        # Reasoning models 400 on temperature/seed — omit them for those ids only.
+        if not _is_openai_reasoning_model(chosen_model):
+            openai_kwargs["temperature"] = chosen_temperature
+            openai_kwargs["seed"] = chosen_seed
+        return ChatOpenAI(**openai_kwargs)
 
     if chosen_provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
@@ -85,13 +101,16 @@ def get_llm(
             )
         # Azure routes by *deployment* name, not model; fall back to the model id
         # when no explicit deployment is configured.
-        return AzureChatOpenAI(
-            azure_deployment=settings.azure_openai_deployment or chosen_model,
-            azure_endpoint=settings.azure_openai_endpoint,
-            api_version=settings.azure_openai_api_version,
-            api_key=api_key,
-            temperature=chosen_temperature,
-            seed=chosen_seed,
-        )
+        azure_kwargs: dict[str, Any] = {
+            "azure_deployment": settings.azure_openai_deployment or chosen_model,
+            "azure_endpoint": settings.azure_openai_endpoint,
+            "api_version": settings.azure_openai_api_version,
+            "api_key": api_key,
+        }
+        # Same reasoning-model carve-out as the direct OpenAI branch.
+        if not _is_openai_reasoning_model(chosen_model):
+            azure_kwargs["temperature"] = chosen_temperature
+            azure_kwargs["seed"] = chosen_seed
+        return AzureChatOpenAI(**azure_kwargs)
 
     raise ValueError(f"Unsupported LLM provider: {chosen_provider!r}")

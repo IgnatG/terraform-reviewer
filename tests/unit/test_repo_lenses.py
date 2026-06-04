@@ -204,3 +204,27 @@ def test_a3_ambiguous_basename_is_not_misattributed(
     state = _state(tmp_path, ["main.tf", "a/util.py", "b/util.py"])
     findings = CoverageLens().run(state).findings
     assert _rule(findings, "coverage:under-covered") == []
+
+
+def test_a3_longer_coverage_path_is_not_misattributed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Regression: a coverage entry that is *longer* than (and ends with) a changed
+    # file (e.g. vendored code at vendor/lib/util.py vs the PR's util.py) must NOT
+    # be credited to that changed file — matching is one-directional.
+    monkeypatch.setattr(settings, "scan_mode", "diff")
+    report = _lcov(tmp_path, "SF:vendor/lib/util.py\nDA:1,0\nDA:2,0\nend_of_record\n")
+    monkeypatch.setattr(settings, "coverage_report_path", report)
+    state = _state(tmp_path, ["main.tf", "util.py"])
+    findings = CoverageLens().run(state).findings
+    assert _rule(findings, "coverage:under-covered") == []
+
+
+def test_a3_score_is_anchored_at_repo_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # The repo-level score is anchored at "." (not an arbitrary changed file), so
+    # it never posts as an inline comment on an unrelated file's line.
+    report = _lcov(tmp_path, "SF:src/foo.py\nDA:1,1\nDA:2,1\nend_of_record\n")
+    monkeypatch.setattr(settings, "coverage_report_path", report)
+    state = _state(tmp_path, ["main.tf", "src/foo.py"])
+    score = _rule(CoverageLens().run(state).findings, "coverage:score")
+    assert score and score[0].file == "." and score[0].line is None

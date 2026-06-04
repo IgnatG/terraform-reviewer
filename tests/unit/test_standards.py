@@ -56,6 +56,38 @@ def test_csv_selection_filters_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [p.id for p in load_active_packs()] == ["terraform-cis-aws"]
 
 
+def test_unknown_pack_id_logs_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A requested id matching no discovered pack silently resolves to inert; warn
+    # so a typo'd / missing pack id is visible instead of looking like "off".
+    from terraform_review_agent.utils.standards import loader as loader_mod
+
+    events: list[tuple[str, tuple[str, ...]]] = []
+    monkeypatch.setattr(
+        loader_mod.log,
+        "warning",
+        lambda event, **kw: events.append((event, tuple(kw.get("requested", ())))),
+    )
+    monkeypatch.setattr(settings, "rule_packs_dir", None)
+    monkeypatch.setattr(settings, "enabled_rule_packs", "terraform-cis-aws, typo-pack")
+
+    active = load_active_packs()
+
+    assert [p.id for p in active] == ["terraform-cis-aws"]  # the real one still loads
+    assert ("rule_pack.unknown_id", ("typo-pack",)) in events
+
+
+def test_all_known_pack_ids_log_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    from terraform_review_agent.utils.standards import loader as loader_mod
+
+    warned: list[str] = []
+    monkeypatch.setattr(loader_mod.log, "warning", lambda event, **kw: warned.append(event))
+    monkeypatch.setattr(settings, "rule_packs_dir", None)
+    monkeypatch.setattr(settings, "enabled_rule_packs", "terraform-cis-aws")
+
+    load_active_packs()
+    assert "rule_pack.unknown_id" not in warned
+
+
 def test_external_dir_packs_loaded_and_invalid_skipped(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
