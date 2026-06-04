@@ -177,3 +177,22 @@ def test_parse_coverage_file_rejects_unknown_xml(tmp_path: Path) -> None:
 
 def test_empty_report_is_fully_covered() -> None:
     assert parse_lcov("").percent == 100.0
+
+
+_BILLION_LAUGHS = """\
+<?xml version="1.0"?>
+<!DOCTYPE coverage [
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+]>
+<coverage><packages><package name="&lol2;"><classes/></package></packages></coverage>
+"""
+
+
+def test_entity_expansion_is_blocked() -> None:
+    # Coverage XML is produced by the reviewed repo's CI (fork-influenceable), so
+    # an entity-expansion ("billion laughs") payload must be refused rather than
+    # parsed. defusedxml raises a ValueError subclass — which the A3 lens catches
+    # and degrades to "no coverage findings".
+    with pytest.raises(ValueError):
+        parse_cobertura(_BILLION_LAUGHS)

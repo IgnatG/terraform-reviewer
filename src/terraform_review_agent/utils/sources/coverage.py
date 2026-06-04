@@ -4,16 +4,18 @@ Built for the A3 "Test Coverage & Gap Analyser" lens (Phase 7): it consumes a
 :class:`CoverageReport` to rank uncovered critical paths. This module is pure
 parsing — no findings are emitted here; the lens decides how to score.
 
-XML inputs are coverage reports produced by the repo's own CI (semi-trusted).
-They are parsed with the stdlib XML parser, which does not resolve external
-entities; we do not parse arbitrary third-party XML here.
+XML inputs are coverage reports produced by the reviewed repo's own CI, which a
+fork PR can influence — so they're parsed with :mod:`defusedxml`, which blocks
+entity-expansion ("billion laughs") and external-entity/XXE attacks the stdlib
+parser is vulnerable to. A blocked document raises a ``ValueError`` subclass,
+which the A3 lens already catches and degrades to "no coverage findings".
 """
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import defusedxml.ElementTree as ET
 from pydantic import BaseModel, Field
 
 

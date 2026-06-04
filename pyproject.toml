@@ -20,6 +20,11 @@ dependencies = [
     "structlog>=25.4",
     "httpx>=0.28",
     "pyyaml>=6.0",
+    # Hardened XML parsing for the coverage-report sources (cobertura/jacoco):
+    # those reports are produced by the reviewed repo's own CI, so a fork PR can
+    # influence them — defusedxml blocks entity-expansion / external-entity (XXE)
+    # attacks that the stdlib parser is vulnerable to.
+    "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]
@@ -75,7 +80,7 @@ files = ["src"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["langgraph.*", "langchain_core.*", "langchain_openai.*", "langchain_anthropic.*", "langchain_google_genai.*", "copilot.*"]
+module = ["langgraph.*", "langchain_core.*", "langchain_openai.*", "langchain_anthropic.*", "langchain_google_genai.*", "copilot.*", "defusedxml.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

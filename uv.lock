@@ -2130,6 +2130,7 @@ name = "terraform-review-agent"
 version = "1.5.0"
 source = { editable = "." }
 dependencies = [
+    { name = "defusedxml" },
     { name = "httpx" },
     { name = "langchain-anthropic" },
     { name = "langchain-core" },
@@ -2161,6 +2162,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "checkov", marker = "extra == 'container'", specifier = "==3.2.532" },
+    { name = "defusedxml", specifier = ">=0.7" },
     { name = "github-copilot-sdk", marker = "extra == 'container'", specifier = ">=1.0" },
     { name = "github-copilot-sdk", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "httpx", specifier = ">=0.28" },
