@@ -11,13 +11,13 @@ license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "ignatg" }]
 dependencies = [
     "langgraph>=1.2",
-    "langchain-core>=1.4",
+    "langchain-core>=1.4.1",
     "langchain-openai>=1.2",
     "langchain-anthropic>=1.4",
     "langchain-google-genai>=4.2",
     "pydantic>=2.13",
     "pydantic-settings>=2.14",
-    "structlog>=25.4",
+    "structlog>=26.1.0",
     "httpx>=0.28",
     "pyyaml>=6.0",
 ]
@@ -26,7 +26,7 @@ dependencies = [
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=1.4",
-    "ruff>=0.15",
+    "ruff>=0.15.16",
     "mypy>=2.1",
     "types-requests",
     "types-pyyaml",
@@ -43,7 +43,7 @@ dev = [
 #   * github-copilot-sdk — the Copilot backend's client (AI_BACKEND=copilot);
 #     pure Python, but it drives the Copilot CLI the Dockerfile installs.
 container = [
-    "checkov==3.2.532",
+    "checkov==3.2.533",
     "github-copilot-sdk>=1.0",
 ]
 
