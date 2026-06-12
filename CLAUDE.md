@@ -51,6 +51,7 @@ terraform-review-agent/
 ├── schemas/findings.schema.json   # versioned findings-JSON output contract
 ├── docs/                     # architecture & extension-point notes
 ├── tests/{unit,integration}/
+├── evals/                    # eval harness (agentevals graph-trajectory) — NEVER imported by src/
 └── scripts/                  # thin wrappers only — no business logic
 ```
 
@@ -211,6 +212,7 @@ Python targets invoke `./.venv/bin/...` — never bare `python`. `run` is the ex
 - `tests/integration/` — compiled graph end-to-end with in-memory SQLite checkpointer
 - Every node gets at least one unit test
 - Use `pytest.fixture` for graph construction to stay DRY
+- `evals/` — offline eval harness (hermetic scanner/AI fakes in `evals/_offline.py`). Two evals: **agentevals graph-trajectory** (routing — `evals/run.py`) and **quality** (golden findings via `evals/golden.py` + `target.py` + `evaluators.py` + openevals, run by `evals/run_quality.py`; opt-in LangSmith path in `evals/langsmith_run.py`). Run with `make eval` (installs the `eval` extra; deterministic, no API key). Live-model judges: `python -m evals.run_quality --judge`. Deps stay in the `eval` optional group; `tests/integration/test_evals_{trajectory,quality}.py` gate them in CI and self-skip when the extra is absent. See [`docs/langchain-eval-integration-plan.md`](docs/langchain-eval-integration-plan.md).
 
 ---
 

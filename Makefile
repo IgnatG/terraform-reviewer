@@ -1,4 +1,4 @@
-.PHONY: venv install lock lock-check fmt lint type test run docker-build docker-up clean
+.PHONY: venv install lock lock-check fmt lint type test eval run docker-build docker-up clean
 
 PIP     := ./.venv/bin/pip
 UV      := ./.venv/bin/uv
@@ -20,18 +20,27 @@ lock-check:
 	$(UV) lock --check
 
 fmt:
-	$(RUFF) format src tests
-	$(RUFF) check --fix src tests
+	$(RUFF) format src tests evals
+	$(RUFF) check --fix src tests evals
 
 lint: lock-check
-	$(RUFF) check src tests
-	$(RUFF) format --check src tests
+	$(RUFF) check src tests evals
+	$(RUFF) format --check src tests evals
 
 type:
 	$(MYPY) src
 
 test:
 	$(PYTEST) -q
+
+# Offline eval suite (agentevals + openevals). Installs the `eval` extra, then
+# runs the graph-trajectory routing check and the deterministic quality check —
+# both hermetic, no API key. For the opt-in live-model judges run the modules
+# directly: `python -m evals.run_quality --judge` or `python -m evals.langsmith_run`.
+eval:
+	$(UV) sync --frozen --inexact --extra dev --extra eval
+	./.venv/bin/python -m evals.run $(ARGS)
+	./.venv/bin/python -m evals.run_quality $(ARGS)
 
 # Run a review locally inside the container, which bundles every scanner
 # (terraform/tfsec/tflint/infracost/checkov) — the host .venv does not. Provide

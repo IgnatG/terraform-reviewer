@@ -186,6 +186,9 @@ class Settings(BaseSettings):
     langsmith_api_key: SecretStr | None = None
     langsmith_tracing: bool = False
     langsmith_project: str = "terraform-review-agent"
+    # Region endpoint; blank = US default. Set to https://eu.api.smith.langchain.com
+    # for an EU-region workspace (a US/EU mismatch returns 403 Forbidden).
+    langsmith_endpoint: str | None = None
 
     log_level: str = "INFO"
     environment: Environment = "development"

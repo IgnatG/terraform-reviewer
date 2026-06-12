@@ -51,6 +51,17 @@ container = [
     "checkov==3.2.532",
     "github-copilot-sdk>=1.0",
 ]
+# Evaluation harness (evals/) — kept out of the runtime + default install so the
+# per-PR agent never ships agentevals/openevals/langsmith. `agentevals` pulls
+# `openevals` (listed explicitly so the harness's direct use is pinned); the
+# LLM-as-judge modes reuse the already-present langchain-openai integration.
+# `jsonschema` (already a dev dep) backs the findings.json schema-validity check.
+eval = [
+    "agentevals>=0.0.9",
+    "openevals>=0.2.0",
+    "langsmith>=0.4",
+    "jsonschema>=4.26",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/terraform_review_agent"]
