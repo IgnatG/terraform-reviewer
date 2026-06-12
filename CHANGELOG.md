@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.6.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.5.0...v1.6.0) (2026-06-12)
+
+
+### Features
+
+* **coverage:** :sparkles: enhance coverage parsing to handle repeated lines and multi-module reports ([6c0f5c7](https://github.com/IgnatG/terraform-reviewer/commit/6c0f5c79813ee156dc4fda696e68190309d5f74e))
+* **evals:** :sparkles: add LangSmith dataset sync and evaluation runner ([5dcd693](https://github.com/IgnatG/terraform-reviewer/commit/5dcd6938ba425689a0972560d07783dc2e8afcb4))
+* **evals:** :sparkles: add target functions for running cases and LangSmith integration ([5dcd693](https://github.com/IgnatG/terraform-reviewer/commit/5dcd6938ba425689a0972560d07783dc2e8afcb4))
+* **evals:** :sparkles: create quality evaluation runner for golden cases ([5dcd693](https://github.com/IgnatG/terraform-reviewer/commit/5dcd6938ba425689a0972560d07783dc2e8afcb4))
+* **evals:** :sparkles: implement agentevals graph-trajectory evaluation runner ([5dcd693](https://github.com/IgnatG/terraform-reviewer/commit/5dcd6938ba425689a0972560d07783dc2e8afcb4))
+* **evals:** :sparkles: introduce trajectory case fixtures for evaluation ([5dcd693](https://github.com/IgnatG/terraform-reviewer/commit/5dcd6938ba425689a0972560d07783dc2e8afcb4))
+* **render:** :sparkles: enhance grouped summary display with findings and rules count ([92ddf91](https://github.com/IgnatG/terraform-reviewer/commit/92ddf917f58003da6e1aff2df2b7470762fa1323))
+
+
+### Bug Fixes
+
+* **config:** :bug: add langsmith_endpoint configuration option ([5dcd693](https://github.com/IgnatG/terraform-reviewer/commit/5dcd6938ba425689a0972560d07783dc2e8afcb4))
+* **coverage:** :sparkles: enhance XML parsing security with defusedxml ([4fa904b](https://github.com/IgnatG/terraform-reviewer/commit/4fa904b213b66ad6cfd10e453b3a9f0d94f305e7))
+* **standards:** :bug: log warnings for unknown rule pack IDs to prevent silent failures ([6c0f5c7](https://github.com/IgnatG/terraform-reviewer/commit/6c0f5c79813ee156dc4fda696e68190309d5f74e))
+
+
+### Code Refactoring
+
+* **lenses:** :recycle: consolidate scanner logic in SecurityLens and StyleLens ([6c0f5c7](https://github.com/IgnatG/terraform-reviewer/commit/6c0f5c79813ee156dc4fda696e68190309d5f74e))
+
+
+### Build System
+
+* :package: add evaluation dependencies to pyproject.toml ([5dcd693](https://github.com/IgnatG/terraform-reviewer/commit/5dcd6938ba425689a0972560d07783dc2e8afcb4))
+
+
+### Tests
+
+* :white_check_mark: add unit tests for LLM provider factory and graph nodes ([6c0f5c7](https://github.com/IgnatG/terraform-reviewer/commit/6c0f5c79813ee156dc4fda696e68190309d5f74e))
+* **evals:** :white_check_mark: add integration tests for quality and trajectory evaluations ([5dcd693](https://github.com/IgnatG/terraform-reviewer/commit/5dcd6938ba425689a0972560d07783dc2e8afcb4))
+
 ## [1.5.0](https://github.com/IgnatG/terraform-reviewer/compare/v1.4.0...v1.5.0) (2026-06-03)
 
 
